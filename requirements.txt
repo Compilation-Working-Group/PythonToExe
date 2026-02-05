@@ -1,4 +1,6 @@
 pandas
 numpy
 openpyxl
+customtkinter
+packaging
 pyinstaller
