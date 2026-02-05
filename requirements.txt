@@ -1,6 +1,10 @@
-pandas
-numpy
-openpyxl
-customtkinter
-packaging
-pyinstaller
+# 科学计算器依赖包
+
+# 运行时依赖
+pyinstaller>=5.0  # 用于打包exe文件
+pywin32>=305      # Windows系统API支持，确保打包后的exe能正常工作
+
+# 可选：如果你使用其他高级功能可以添加
+numpy>=1.24.0   # 如果需要更强大的数学计算
+scipy>=1.10.0   # 如果需要科学计算功能
+matplotlib>=3.7.0  # 如果需要绘图功能
