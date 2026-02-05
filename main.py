@@ -4,6 +4,8 @@ import numpy as np
 import threading
 import os
 import sys
+import platform     # 新增：判断操作系统
+import subprocess   # 新增：用于执行打开文件夹命令
 from tkinter import filedialog, messagebox
 
 # --- 全局外观设置 ---
@@ -379,12 +381,32 @@ class GaokaoApp(ctk.CTk):
         self.btn_calc.configure(state="normal")
 
     def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
+        save_path = filedialog.asksaveasfilename(
+            title="保存结果", 
+            defaultextension=".xlsx", 
+            filetypes=[("Excel files", "*.xlsx")], 
+            initialfile="赋分结果_自定义参数.xlsx"
+        )
         if save_path:
             try:
                 self.df_result.to_excel(save_path, index=False)
                 messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
+                
+                # --- 跨平台打开文件夹逻辑 ---
+                folder_path = os.path.dirname(save_path)
+                system_name = platform.system()
+                
+                try:
+                    if system_name == "Windows":
+                        os.startfile(folder_path)
+                    elif system_name == "Darwin": # macOS
+                        subprocess.call(["open", folder_path])
+                    else: # Linux
+                        subprocess.call(["xdg-open", folder_path])
+                except Exception as open_err:
+                    print(f"尝试打开文件夹失败: {open_err}")
+                # -------------------------
+
             except Exception as e:
                 messagebox.showerror("保存失败", str(e))
 
