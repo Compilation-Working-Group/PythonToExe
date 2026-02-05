@@ -1,0 +1,54 @@
+name: Cleanup Workflow (Dangerous)
+
+# 仅允许手动触发，防止意外运行
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # 用于删除 Releases 和 Tags
+  actions: write   # 用于删除 Workflow 运行记录
+
+jobs:
+  cleanup-everything:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # 1. 清理所有已经完成的工作流运行记录
+      # 使用 Mattraks/delete-workflow-runs 插件
+      # ----------------------------------------------------------------
+      - name: Delete all workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0       # 保留 0 天（即删除所有）
+          keep_minimum_runs: 0 # 保留 0 个记录
+
+      # ----------------------------------------------------------------
+      # 2. 清理所有 Releases 和 Tags
+      # 使用 GitHub CLI (gh) 脚本
+      # ----------------------------------------------------------------
+      - name: Delete all Releases and Tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching list of releases..."
+          
+          # 获取最多 1000 个 Release 的 tag 名称
+          # 如果你的 Release 非常多，可能需要循环运行几次
+          releases=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+
+          if [ -z "$releases" ]; then
+            echo "No releases found to delete."
+          else
+            echo "Found releases. Deleting..."
+            for tag in $releases; do
+              echo "Deleting release and tag: $tag"
+              # --cleanup-tag 参数会在删除 Release 的同时删除对应的 Git Tag
+              gh release delete "$tag" --cleanup-tag -y || true
+            done
+            echo "All releases and tags deleted."
+          fi
