@@ -2,12 +2,23 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import math
 import re
+import sys
+import platform
 
 class ScientificCalculator:
     def __init__(self, root):
         self.root = root
-        self.root.title("科学计算器")
-        self.root.geometry("500x700")
+        self.root.title("科学计算器 - 跨平台版")
+        
+        # 根据操作系统调整窗口大小
+        system = platform.system()
+        if system == "Windows":
+            self.root.geometry("500x700")
+        elif system == "Darwin":  # macOS
+            self.root.geometry("520x720")  # macOS 通常需要稍大一些的窗口
+        else:  # Linux 和其他
+            self.root.geometry("500x700")
+        
         self.root.resizable(False, False)
         
         # 设置主题
@@ -23,11 +34,17 @@ class ScientificCalculator:
         self.result_var = tk.StringVar()
         self.result_var.set("0")
         
+        # 操作系统信息
+        self.system_info = f"系统: {platform.system()} {platform.release()}"
+        
         # 创建界面
         self.setup_ui()
         
         # 绑定键盘事件
         self.root.bind('<Key>', self.key_press)
+        
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
     def setup_colors(self):
         """设置颜色主题"""
@@ -61,6 +78,20 @@ class ScientificCalculator:
         # 主框架
         main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 顶部信息栏
+        info_frame = tk.Frame(main_frame, bg=self.bg_color, height=20)
+        info_frame.pack(fill=tk.X, pady=(0, 5))
+        info_frame.pack_propagate(False)
+        
+        info_label = tk.Label(
+            info_frame,
+            text=self.system_info,
+            bg=self.bg_color,
+            fg=self.history_text,
+            font=("Arial", 8)
+        )
+        info_label.pack(side=tk.LEFT)
         
         # 结果显示区域
         display_frame = tk.Frame(main_frame, bg=self.display_bg, height=80)
@@ -220,6 +251,19 @@ class ScientificCalculator:
             width=12
         )
         use_history_btn.pack(side=tk.LEFT)
+        
+        # 退出按钮
+        quit_btn = tk.Button(
+            history_btn_frame, 
+            text="退出", 
+            command=self.on_closing,
+            bg=self.func_btn,
+            fg=self.btn_text,
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            width=8
+        )
+        quit_btn.pack(side=tk.RIGHT)
     
     def add_to_expression(self, value):
         """向表达式中添加值"""
@@ -377,9 +421,24 @@ class ScientificCalculator:
             self.clear_all()
         elif key == 'c' or key == 'C':
             self.clear_entry()
+    
+    def on_closing(self):
+        """处理窗口关闭事件"""
+        if messagebox.askokcancel("退出", "确定要退出科学计算器吗？"):
+            self.root.destroy()
 
 def main():
     root = tk.Tk()
+    
+    # 设置应用程序图标（如果有的话）
+    try:
+        # 尝试设置应用程序图标
+        system = platform.system()
+        if system == "Windows":
+            root.iconbitmap(default='icon.ico')  # Windows图标
+    except:
+        pass  # 如果图标文件不存在，忽略错误
+    
     app = ScientificCalculator(root)
     root.mainloop()
 
