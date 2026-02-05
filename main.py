@@ -1,393 +1,387 @@
-import customtkinter as ctk
-import pandas as pd
-import numpy as np
-import threading
-import os
-import sys
-from tkinter import filedialog, messagebox
+import tkinter as tk
+from tkinter import ttk, messagebox
+import math
+import re
 
-# --- 全局外观设置 ---
-ctk.set_appearance_mode("System")  
-ctk.set_default_color_theme("blue")  
-
-class GaokaoApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-
-        # 1. 窗口基础设置
-        self.title("甘肃新高考赋分系统 Pro Max (自定义参数版) | 俞晋全名师工作室")
-        self.geometry("1200x850")
-        self.minsize(1000, 750)
+class ScientificCalculator:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("科学计算器")
+        self.root.geometry("500x700")
+        self.root.resizable(False, False)
         
-        # 数据变量
-        self.file_path = None
-        self.df_raw = None
-        self.sheet_names = []
-        self.param_entries = {} # 存储参数输入框的字典
+        # 设置主题
+        self.dark_mode = False
+        self.setup_colors()
         
-        # 布局配置
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-
-        # ==========================
-        # === 左侧边栏 (操作区) ===
-        # ==========================
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(9, weight=1) 
-
-        # Logo
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="高考赋分工具", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 20))
-
-        # 1. 导入
-        self.btn_load = ctk.CTkButton(self.sidebar_frame, text="1. 导入Excel成绩表", height=40, command=self.load_file_action)
-        self.btn_load.grid(row=1, column=0, padx=20, pady=10)
-
-        # 2. Sheet选择
-        self.lbl_sheet = ctk.CTkLabel(self.sidebar_frame, text="选择工作表 (Sheet):", anchor="w")
-        self.lbl_sheet.grid(row=2, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.sheet_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_sheet_event)
-        self.sheet_dropdown.grid(row=3, column=0, padx=20, pady=(5, 10))
-        self.sheet_dropdown.set("等待导入...")
-        self.sheet_dropdown.configure(state="disabled")
-
-        # 3. 班级列
-        self.lbl_class = ctk.CTkLabel(self.sidebar_frame, text="指定班级列 (计算班排):", anchor="w")
-        self.lbl_class.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="w")
-        self.class_col_dropdown = ctk.CTkOptionMenu(self.sidebar_frame, values=[])
-        self.class_col_dropdown.grid(row=5, column=0, padx=20, pady=(5, 10))
-        self.class_col_dropdown.set("等待加载...")
-
-        # 底部按钮区
-        self.btn_calc = ctk.CTkButton(self.sidebar_frame, text="开始赋分计算", height=50, fg_color="green", font=ctk.CTkFont(size=16, weight="bold"), command=self.start_calculation)
-        self.btn_calc.grid(row=10, column=0, padx=20, pady=15)
-        self.btn_calc.configure(state="disabled")
-
-        self.btn_export = ctk.CTkButton(self.sidebar_frame, text="导出结果 Excel", height=40, command=self.export_file)
-        self.btn_export.grid(row=11, column=0, padx=20, pady=(0, 30))
-        self.btn_export.configure(state="disabled")
-
-        # ==========================
-        # === 右侧主内容区 (Tab) ===
-        # ==========================
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # 历史记录
+        self.history = []
+        self.max_history = 10
         
-        # 状态栏
-        self.status_label = ctk.CTkLabel(self.main_frame, text="欢迎使用！请先导入数据，然后确认【赋分标准】。", anchor="w", font=("Microsoft YaHei UI", 16))
-        self.status_label.pack(fill="x", pady=(0, 10))
-
-        # 创建选项卡
-        self.tabview = ctk.CTkTabview(self.main_frame)
-        self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("科目设置")
-        self.tabview.add("赋分标准设置")
+        # 表达式变量
+        self.expression = ""
+        self.result_var = tk.StringVar()
+        self.result_var.set("0")
         
-        # --- Tab 1: 科目设置 ---
-        self.setup_subject_tab()
-
-        # --- Tab 2: 赋分参数设置 ---
-        self.setup_params_tab()
-
-        # 进度条
-        self.progressbar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progressbar.pack(fill="x", pady=(15, 0))
-        self.progressbar.set(0)
-
-    # --------------------------
-    # 界面构建辅助函数
-    # --------------------------
-    def setup_subject_tab(self):
-        tab = self.tabview.tab("科目设置")
+        # 创建界面
+        self.setup_ui()
         
-        # 滚动设置区
-        self.scroll_frame = ctk.CTkScrollableFrame(tab, label_text="勾选对应列名")
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # 原始计入科目区
-        self.lbl_raw = ctk.CTkLabel(self.scroll_frame, text="【直接计入总分】 (语数外 + 物理/历史):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_raw.pack(fill="x", pady=(10, 5), padx=10)
-        self.raw_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.raw_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.raw_checkboxes = []
-
-        # 赋分科目区
-        self.lbl_assign = ctk.CTkLabel(self.scroll_frame, text="【等级赋分科目】 (化生政地):", anchor="w", font=("Microsoft YaHei UI", 13, "bold"), text_color=("gray30", "gray80"))
-        self.lbl_assign.pack(fill="x", pady=(25, 5), padx=10)
-        self.assign_checkboxes_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        self.assign_checkboxes_frame.pack(fill="x", pady=5, padx=10)
-        self.assign_checkboxes = []
-
-    def setup_params_tab(self):
-        tab = self.tabview.tab("赋分标准设置")
+        # 绑定键盘事件
+        self.root.bind('<Key>', self.key_press)
         
-        info_lbl = ctk.CTkLabel(tab, text="请根据实际需求修改参数（默认值为甘肃省标准）。\n人数比例请输入整数（如15代表15%）。", font=("Microsoft YaHei UI", 13))
-        info_lbl.pack(pady=10)
-
-        # 参数网格容器
-        grid_frame = ctk.CTkFrame(tab)
-        grid_frame.pack(padx=20, pady=10)
-
-        # 表头
-        headers = ["等级", "人数比例 (%)", "赋分上限 (T2)", "赋分下限 (T1)"]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(grid_frame, text=text, font=("Arial", 12, "bold")).grid(row=0, column=col, padx=15, pady=10)
-
-        # 默认数据 (甘肃标准)
-        default_data = [
-            ('A', '15', '100', '86'),
-            ('B', '35', '85',  '71'),
-            ('C', '35', '70',  '56'),
-            ('D', '13', '55',  '41'),
-            ('E', '2',  '40',  '30')
+    def setup_colors(self):
+        """设置颜色主题"""
+        if self.dark_mode:
+            # 深色主题
+            self.bg_color = "#2e2e2e"
+            self.btn_color = "#3c3c3c"
+            self.btn_text = "#ffffff"
+            self.display_bg = "#1e1e1e"
+            self.display_text = "#ffffff"
+            self.history_bg = "#252525"
+            self.history_text = "#cccccc"
+            self.special_btn = "#ff9500"
+            self.special_text = "#ffffff"
+            self.func_btn = "#505050"
+        else:
+            # 浅色主题
+            self.bg_color = "#f0f0f0"
+            self.btn_color = "#ffffff"
+            self.btn_text = "#000000"
+            self.display_bg = "#ffffff"
+            self.display_text = "#000000"
+            self.history_bg = "#e8e8e8"
+            self.history_text = "#333333"
+            self.special_btn = "#ff9500"
+            self.special_text = "#ffffff"
+            self.func_btn = "#e0e0e0"
+    
+    def setup_ui(self):
+        """设置用户界面"""
+        # 主框架
+        main_frame = tk.Frame(self.root, bg=self.bg_color)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 结果显示区域
+        display_frame = tk.Frame(main_frame, bg=self.display_bg, height=80)
+        display_frame.pack(fill=tk.X, pady=(0, 10))
+        display_frame.pack_propagate(False)
+        
+        # 历史记录显示
+        self.history_label = tk.Label(
+            display_frame, 
+            text="", 
+            anchor=tk.E, 
+            bg=self.display_bg, 
+            fg=self.history_text,
+            font=("Arial", 10)
+        )
+        self.history_label.pack(fill=tk.X, padx=10, pady=(5, 0))
+        
+        # 结果显示
+        result_label = tk.Label(
+            display_frame, 
+            textvariable=self.result_var, 
+            anchor=tk.E, 
+            bg=self.display_bg, 
+            fg=self.display_text,
+            font=("Arial", 24, "bold")
+        )
+        result_label.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # 历史记录区域
+        history_frame = tk.Frame(main_frame, bg=self.history_bg, height=100)
+        history_frame.pack(fill=tk.X, pady=(0, 10))
+        history_frame.pack_propagate(False)
+        
+        history_title = tk.Label(
+            history_frame, 
+            text="历史记录", 
+            bg=self.history_bg, 
+            fg=self.history_text,
+            font=("Arial", 10, "bold")
+        )
+        history_title.pack(anchor=tk.W, padx=10, pady=(5, 0))
+        
+        # 历史记录列表
+        self.history_listbox = tk.Listbox(
+            history_frame, 
+            bg=self.history_bg, 
+            fg=self.history_text,
+            font=("Arial", 9),
+            borderwidth=0,
+            highlightthickness=0,
+            selectbackground=self.special_btn,
+            selectforeground=self.special_text,
+            height=5
+        )
+        self.history_listbox.pack(fill=tk.BOTH, padx=10, pady=5, expand=True)
+        
+        # 历史记录滚动条
+        history_scrollbar = tk.Scrollbar(self.history_listbox, orient=tk.VERTICAL)
+        history_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.history_listbox.config(yscrollcommand=history_scrollbar.set)
+        history_scrollbar.config(command=self.history_listbox.yview)
+        
+        # 按钮区域
+        buttons_frame = tk.Frame(main_frame, bg=self.bg_color)
+        buttons_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 按钮布局
+        buttons = [
+            # 第一行
+            [('C', self.clear_all, self.special_btn), ('CE', self.clear_entry, self.special_btn), 
+             ('⌫', self.backspace, self.special_btn), ('÷', lambda: self.add_to_expression('/'), self.special_btn),
+             ('sin', lambda: self.add_function('sin('), self.func_btn), ('cos', lambda: self.add_function('cos('), self.func_btn)],
+            
+            # 第二行
+            [('7', lambda: self.add_to_expression('7'), self.btn_color), ('8', lambda: self.add_to_expression('8'), self.btn_color), 
+             ('9', lambda: self.add_to_expression('9'), self.btn_color), ('×', lambda: self.add_to_expression('*'), self.special_btn),
+             ('tan', lambda: self.add_function('tan('), self.func_btn), ('log', lambda: self.add_function('log('), self.func_btn)],
+            
+            # 第三行
+            [('4', lambda: self.add_to_expression('4'), self.btn_color), ('5', lambda: self.add_to_expression('5'), self.btn_color), 
+             ('6', lambda: self.add_to_expression('6'), self.btn_color), ('-', lambda: self.add_to_expression('-'), self.special_btn),
+             ('√', lambda: self.add_function('sqrt('), self.func_btn), ('x²', lambda: self.add_to_expression('**2'), self.func_btn)],
+            
+            # 第四行
+            [('1', lambda: self.add_to_expression('1'), self.btn_color), ('2', lambda: self.add_to_expression('2'), self.btn_color), 
+             ('3', lambda: self.add_to_expression('3'), self.btn_color), ('+', lambda: self.add_to_expression('+'), self.special_btn),
+             ('π', lambda: self.add_to_expression(str(math.pi)), self.func_btn), ('e', lambda: self.add_to_expression(str(math.e)), self.func_btn)],
+            
+            # 第五行
+            [('0', lambda: self.add_to_expression('0'), self.btn_color), ('.', lambda: self.add_to_expression('.'), self.btn_color), 
+             ('(', lambda: self.add_to_expression('('), self.btn_color), (')', lambda: self.add_to_expression(')'), self.btn_color),
+             ('=', self.calculate, self.special_btn), ('x^y', lambda: self.add_to_expression('**'), self.func_btn)]
         ]
-
-        self.param_entries = {} # 格式: {'A_pct': entry, 'A_max': entry...}
-
-        for row, (grade, pct, tmax, tmin) in enumerate(default_data, start=1):
-            # 等级标签
-            ctk.CTkLabel(grid_frame, text=grade, font=("Arial", 14, "bold")).grid(row=row, column=0, pady=5)
-            
-            # 百分比输入
-            e_pct = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_pct.insert(0, pct)
-            e_pct.grid(row=row, column=1, pady=5)
-            
-            # 上限输入
-            e_max = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_max.insert(0, tmax)
-            e_max.grid(row=row, column=2, pady=5)
-            
-            # 下限输入
-            e_min = ctk.CTkEntry(grid_frame, width=80, justify="center")
-            e_min.insert(0, tmin)
-            e_min.grid(row=row, column=3, pady=5)
-
-            # 存入字典方便调用
-            self.param_entries[f"{grade}_percent"] = e_pct
-            self.param_entries[f"{grade}_max"] = e_max
-            self.param_entries[f"{grade}_min"] = e_min
-
-    # --------------------------
-    # 文件加载与 UI 更新逻辑
-    # --------------------------
-    def load_file_action(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
-        if not file_path: return
         
-        self.file_path = file_path
-        self.status_label.configure(text=f"正在分析文件: {os.path.basename(file_path)}...")
-        self.progressbar.start()
-        threading.Thread(target=self.read_excel_sheets).start()
-
-    def read_excel_sheets(self):
-        try:
-            excel_file = pd.ExcelFile(self.file_path)
-            self.sheet_names = excel_file.sheet_names
-            self.after(0, self.update_sheet_ui)
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("错误", f"读取失败: {e}"))
-            self.after(0, self.progressbar.stop)
-
-    def update_sheet_ui(self):
-        self.progressbar.stop()
-        self.progressbar.set(1)
-        self.status_label.configure(text=f"已就绪: {os.path.basename(self.file_path)}")
-        self.sheet_dropdown.configure(values=self.sheet_names, state="normal")
-        self.sheet_dropdown.set(self.sheet_names[0])
-        self.change_sheet_event(self.sheet_names[0])
-
-    def change_sheet_event(self, sheet_name):
-        try:
-            self.df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name)
-            columns = self.df_raw.columns.tolist()
-            
-            self.class_col_dropdown.configure(values=columns)
-            default_class = next((c for c in columns if "班" in str(c)), columns[0] if columns else "")
-            self.class_col_dropdown.set(default_class)
-
-            self.create_subject_checkboxes(columns)
-            
-            self.btn_calc.configure(state="normal")
-            self.status_label.configure(text=f"当前工作表: {sheet_name} | 请在【科目设置】页勾选")
-        except Exception as e:
-            messagebox.showerror("错误", f"加载工作表失败: {e}")
-
-    def create_subject_checkboxes(self, columns):
-        for cb in self.raw_checkboxes + self.assign_checkboxes: cb.destroy()
-        self.raw_checkboxes.clear()
-        self.assign_checkboxes.clear()
-        
-        common_raw = ["语文", "数学", "英语", "物理", "历史", "外语"]
-        common_assign = ["化学", "生物", "地理", "政治", "思想政治"]
-
-        def add_cb(parent, text, storage, keywords):
-            cb = ctk.CTkCheckBox(parent, text=text, font=("Microsoft YaHei UI", 12))
-            cb.grid(row=len(storage)//5, column=len(storage)%5, sticky="w", padx=10, pady=8)
-            if any(k in str(text) for k in keywords): cb.select()
-            storage.append(cb)
-
-        for col in columns:
-            add_cb(self.raw_checkboxes_frame, col, self.raw_checkboxes, common_raw)
-        for col in columns:
-            add_cb(self.assign_checkboxes_frame, col, self.assign_checkboxes, common_assign)
-
-    # --------------------------
-    # 核心计算逻辑 (动态读取参数)
-    # --------------------------
-    def get_user_configs(self):
-        """从UI界面读取用户输入的参数"""
-        configs = []
-        grades = ['A', 'B', 'C', 'D', 'E']
-        try:
-            for g in grades:
-                pct = float(self.param_entries[f"{g}_percent"].get()) / 100.0
-                t_max = int(self.param_entries[f"{g}_max"].get())
-                t_min = int(self.param_entries[f"{g}_min"].get())
+        # 创建按钮
+        for i, row in enumerate(buttons):
+            for j, (text, command, color) in enumerate(row):
+                btn = tk.Button(
+                    buttons_frame, 
+                    text=text, 
+                    command=command,
+                    bg=color,
+                    fg=self.btn_text if color == self.btn_color else self.special_text,
+                    font=("Arial", 14, "bold"),
+                    relief=tk.FLAT,
+                    height=2,
+                    width=5 if text not in ['sin', 'cos', 'tan', 'log', 'x^y'] else 6
+                )
+                btn.grid(row=i, column=j, padx=2, pady=2, sticky="nsew")
                 
-                configs.append({
-                    'grade': g,
-                    'percent': pct,
-                    't_max': t_max,
-                    't_min': t_min
-                })
-            return configs
-        except ValueError:
-            messagebox.showerror("参数错误", "赋分标准中请输入有效的数字！")
-            return None
-
-    def start_calculation(self):
-        self.selected_raw = [cb.cget("text") for cb in self.raw_checkboxes if cb.get() == 1]
-        self.selected_assign = [cb.cget("text") for cb in self.assign_checkboxes if cb.get() == 1]
-        self.selected_class_col = self.class_col_dropdown.get()
-
-        if not self.selected_raw and not self.selected_assign:
-            messagebox.showwarning("提示", "请至少勾选一个科目！")
+                # 鼠标悬停效果
+                btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#d0d0d0" if b.cget("bg") == self.btn_color else "#ffaa33"))
+                btn.bind("<Leave>", lambda e, b=btn, c=color: b.config(bg=c))
+        
+        # 设置按钮区域网格权重
+        for i in range(6):
+            buttons_frame.grid_columnconfigure(i, weight=1)
+        for i in range(5):
+            buttons_frame.grid_rowconfigure(i, weight=1)
+        
+        # 主题切换按钮
+        theme_btn = tk.Button(
+            main_frame, 
+            text="🌙 深色模式" if not self.dark_mode else "☀️ 浅色模式", 
+            command=self.toggle_theme,
+            bg=self.special_btn,
+            fg=self.special_text,
+            font=("Arial", 10),
+            relief=tk.FLAT
+        )
+        theme_btn.pack(fill=tk.X, pady=(10, 0))
+        
+        # 历史记录操作按钮
+        history_btn_frame = tk.Frame(main_frame, bg=self.bg_color)
+        history_btn_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        clear_history_btn = tk.Button(
+            history_btn_frame, 
+            text="清空历史", 
+            command=self.clear_history,
+            bg=self.func_btn,
+            fg=self.btn_text,
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            width=10
+        )
+        clear_history_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        use_history_btn = tk.Button(
+            history_btn_frame, 
+            text="使用选中历史", 
+            command=self.use_history,
+            bg=self.func_btn,
+            fg=self.btn_text,
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            width=12
+        )
+        use_history_btn.pack(side=tk.LEFT)
+    
+    def add_to_expression(self, value):
+        """向表达式中添加值"""
+        if self.result_var.get() == "0" and value not in '/*-+':
+            self.expression = value
+        else:
+            self.expression += value
+        
+        self.result_var.set(self.expression)
+    
+    def add_function(self, func):
+        """添加函数到表达式"""
+        # 如果当前显示的是结果，则清空表达式
+        if self.result_var.get() == "0" or self.is_result_displayed():
+            self.expression = ""
+        
+        self.expression += func
+        self.result_var.set(self.expression)
+    
+    def clear_all(self):
+        """清除所有"""
+        self.expression = ""
+        self.result_var.set("0")
+    
+    def clear_entry(self):
+        """清除当前输入"""
+        self.expression = ""
+        self.result_var.set("0")
+    
+    def backspace(self):
+        """退格删除"""
+        if self.expression:
+            self.expression = self.expression[:-1]
+            self.result_var.set(self.expression if self.expression else "0")
+    
+    def calculate(self):
+        """计算表达式"""
+        if not self.expression:
             return
         
-        # 验证并获取配置
-        self.user_configs = self.get_user_configs()
-        if not self.user_configs:
-            return
-
-        self.btn_calc.configure(state="disabled")
-        self.status_label.configure(text="正在根据自定义参数计算...")
-        self.progressbar.configure(mode="indeterminate")
-        self.progressbar.start()
-        
-        threading.Thread(target=self.run_math_logic).start()
-
-    def run_math_logic(self):
         try:
-            df = self.df_raw.copy()
-            grade_configs = self.user_configs # 使用用户自定义的配置
-
-            def calculate_assigned_score(series):
-                series_num = pd.to_numeric(series, errors='coerce')
-                valid = series_num.dropna()
-                if len(valid) == 0: return pd.Series(index=series.index, dtype=float)
-                
-                sorted_scores = valid.sort_values(ascending=False)
-                result = pd.Series(index=valid.index, dtype=float)
-                curr = 0
-                for cfg in grade_configs:
-                    cnt = int(np.round(len(valid) * cfg['percent']))
-                    if cfg['grade'] == 'E': cnt = len(valid) - curr
-                    if cnt <= 0: continue
-                    end = min(curr + cnt, len(valid))
-                    if curr >= end: break
-                    chunk = sorted_scores.iloc[curr:end]
-                    Y2, Y1 = chunk.max(), chunk.min()
-                    T2, T1 = cfg['t_max'], cfg['t_min']
-                    
-                    def linear(Y): return (T2+T1)/2 if Y2==Y1 else T1 + ((Y-Y1)*(T2-T1))/(Y2-Y1)
-                    
-                    result.loc[chunk.index] = chunk.apply(linear)
-                    curr = end
-                return result.round()
-
-            def calc_ranks(dframe, target_col, rank_base_name):
-                yr_rk = f"{rank_base_name}年排"
-                cl_rk = f"{rank_base_name}班排"
-                dframe[yr_rk] = dframe[target_col].rank(ascending=False, method='min')
-                if self.selected_class_col in dframe.columns:
-                    dframe[cl_rk] = dframe.groupby(self.selected_class_col)[target_col].rank(ascending=False, method='min')
+            # 将表达式的数学符号转换为Python可识别的符号
+            expr = self.expression.replace('×', '*').replace('÷', '/')
+            
+            # 处理数学函数
+            expr = expr.replace('sqrt', 'math.sqrt')
+            expr = expr.replace('sin', 'math.sin')
+            expr = expr.replace('cos', 'math.cos')
+            expr = expr.replace('tan', 'math.tan')
+            expr = expr.replace('log', 'math.log10')
+            
+            # 计算表达式
+            result = eval(expr, {"__builtins__": None}, {"math": math})
+            
+            # 处理浮点数精度
+            if isinstance(result, float):
+                # 如果是整数，则显示为整数
+                if result.is_integer():
+                    result = int(result)
                 else:
-                    dframe[cl_rk] = None
-                return yr_rk, cl_rk
-
-            cols_for_raw_total = []    
-            cols_for_final_total = []  
-            output_cols_order = []     
-
-            # 1. 原始科目
-            for sub in self.selected_raw:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                yr_rk, cl_rk = calc_ranks(df, sub, sub)
-                cols_for_raw_total.append(sub)
-                cols_for_final_total.append(sub)
-                output_cols_order.extend([sub, yr_rk, cl_rk])
-
-            # 2. 赋分科目
-            for sub in self.selected_assign:
-                df[sub] = pd.to_numeric(df[sub], errors='coerce')
-                assigned_col_name = f"{sub}赋分"
-                df[assigned_col_name] = calculate_assigned_score(df[sub])
-                
-                yr_rk, cl_rk = calc_ranks(df, assigned_col_name, assigned_col_name)
-                
-                cols_for_raw_total.append(sub)            
-                cols_for_final_total.append(assigned_col_name) 
-                output_cols_order.extend([sub, assigned_col_name, yr_rk, cl_rk])
-
-            # 3. 原始总分
-            df["原始总分"] = df[cols_for_raw_total].sum(axis=1, min_count=1)
-            raw_yr_rk, raw_cl_rk = calc_ranks(df, "原始总分", "原始总分")
-            raw_total_group = ["原始总分", raw_yr_rk, raw_cl_rk]
-
-            # 4. 最终总分
-            df["总分"] = df[cols_for_final_total].sum(axis=1, min_count=1)
-            final_yr_rk, final_cl_rk = calc_ranks(df, "总分", "总分")
-            final_total_group = ["总分", final_yr_rk, final_cl_rk]
-
-            df = df.sort_values(final_yr_rk)
-
-            all_generated_cols = set(output_cols_order + raw_total_group + final_total_group)
-            base_info_cols = [c for c in df.columns if c not in all_generated_cols]
+                    # 限制小数位数为10位
+                    result = round(result, 10)
             
-            final_order = base_info_cols + output_cols_order + raw_total_group + final_total_group
-            final_order = [c for c in final_order if c in df.columns]
-            self.df_result = df[final_order]
-
-            self.after(0, self.finish_calculation)
-
+            # 保存到历史记录
+            history_item = f"{self.expression} = {result}"
+            self.history.insert(0, history_item)
+            if len(self.history) > self.max_history:
+                self.history.pop()
+            
+            # 更新历史记录显示
+            self.update_history()
+            
+            # 显示结果
+            self.result_var.set(str(result))
+            self.expression = str(result)
+            
+        except ZeroDivisionError:
+            messagebox.showerror("错误", "除以零错误！")
+            self.clear_entry()
+        except ValueError as e:
+            messagebox.showerror("错误", f"数学错误: {str(e)}")
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("计算错误", str(e)))
-            self.after(0, self.stop_loading_ui)
+            messagebox.showerror("错误", f"无效表达式: {str(e)}")
+    
+    def is_result_displayed(self):
+        """检查当前显示的是否是计算结果"""
+        # 简单检查：如果表达式为空但结果显示不为0，或者表达式与结果相同
+        if not self.expression and self.result_var.get() != "0":
+            return True
+        
+        # 检查结果是否只包含数字和小数点
+        result = self.result_var.get()
+        if re.match(r'^[-+]?[0-9]*\.?[0-9]+$', result):
+            return True
+        
+        return False
+    
+    def update_history(self):
+        """更新历史记录显示"""
+        self.history_listbox.delete(0, tk.END)
+        for item in self.history:
+            self.history_listbox.insert(tk.END, item)
+    
+    def clear_history(self):
+        """清空历史记录"""
+        self.history = []
+        self.update_history()
+    
+    def use_history(self):
+        """使用选中的历史记录"""
+        selection = self.history_listbox.curselection()
+        if selection:
+            item = self.history_listbox.get(selection[0])
+            # 提取表达式部分（等号之前的部分）
+            if '=' in item:
+                expr = item.split('=')[0].strip()
+                self.expression = expr
+                self.result_var.set(expr)
+    
+    def toggle_theme(self):
+        """切换主题"""
+        self.dark_mode = not self.dark_mode
+        self.setup_colors()
+        
+        # 重新创建界面
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        self.setup_ui()
+    
+    def key_press(self, event):
+        """处理键盘事件"""
+        key = event.char
+        
+        # 数字和运算符
+        if key in '0123456789':
+            self.add_to_expression(key)
+        elif key in '+-*/':
+            # 将*和/转换为计算器上的符号
+            if key == '*':
+                self.add_to_expression('×')
+            elif key == '/':
+                self.add_to_expression('÷')
+            else:
+                self.add_to_expression(key)
+        elif key == '.':
+            self.add_to_expression('.')
+        elif key == '(' or key == ')':
+            self.add_to_expression(key)
+        elif key == '\r':  # 回车键
+            self.calculate()
+        elif key == '\x08':  # 退格键
+            self.backspace()
+        elif key == '\x1b':  # ESC键
+            self.clear_all()
+        elif key == 'c' or key == 'C':
+            self.clear_entry()
 
-    def finish_calculation(self):
-        self.stop_loading_ui()
-        self.status_label.configure(text="✅ 计算完成！数据已应用当前赋分标准。")
-        self.btn_export.configure(state="normal", fg_color="#2CC985", text="导出 Excel 结果")
-        messagebox.showinfo("成功", "计算完成！\n请注意：本次计算使用了您在【赋分标准设置】中填写的参数。")
-
-    def stop_loading_ui(self):
-        self.progressbar.stop()
-        self.progressbar.configure(mode="determinate")
-        self.progressbar.set(1)
-        self.btn_calc.configure(state="normal")
-
-    def export_file(self):
-        save_path = filedialog.asksaveasfilename(title="保存结果", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile="赋分结果_自定义参数.xlsx")
-        if save_path:
-            try:
-                self.df_result.to_excel(save_path, index=False)
-                messagebox.showinfo("导出成功", f"文件已保存至:\n{save_path}")
-                os.startfile(os.path.dirname(save_path))
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e))
+def main():
+    root = tk.Tk()
+    app = ScientificCalculator(root)
+    root.mainloop()
 
 if __name__ == "__main__":
-    app = GaokaoApp()
-    app.mainloop()
+    main()
