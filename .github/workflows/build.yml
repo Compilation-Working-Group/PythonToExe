@@ -1,10 +1,13 @@
-name: Build Molecule Viewer
+name: Build Molecule Viewer (Manual)
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+# 核心修改：只允许手动触发 (workflow_dispatch)
+on: 
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: '版本号 (可选, 仅作标记)'
+        required: false
+        default: 'v1.0'
 
 jobs:
   build:
@@ -21,7 +24,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10' # 3.10 兼容性较好
+        python-version: '3.10'
 
     - name: Install Dependencies
       run: |
@@ -29,15 +32,17 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # 使用 --onefile 打包成单文件，--noconsole 隐藏黑框(仅限Win/Mac)
+      # 增加 --clean 清理缓存，确保构建纯净
       run: |
         pyinstaller --name="Chem3D_Viewer" --onefile --windowed --clean --collect-all customtkinter main.py
 
-    - name: Rename Output (Linux/Mac)
+    # Linux/Mac 重命名
+    - name: Rename Output (Unix)
       if: matrix.os != 'windows-latest'
       run: |
         mv dist/Chem3D_Viewer dist/Chem3D_Viewer_${{ matrix.os }}
 
+    # Windows 重命名
     - name: Rename Output (Windows)
       if: matrix.os == 'windows-latest'
       run: |
