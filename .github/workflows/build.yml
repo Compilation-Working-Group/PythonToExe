@@ -1,10 +1,10 @@
-name: Build SmartDivider Final
+name: Build SmartDivider Final Fix
 
 on:
   push:
     tags:
-      - 'v*'  # 打标签 v1.0 等触发
-  workflow_dispatch: # 允许手动点按钮触发
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -16,19 +16,18 @@ jobs:
         include:
           - os: windows-latest
             TARGET: windows
-            # Windows 下通常比较宽容，但也加上 hidden-import 以防万一
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --name SmartDivider-Win main.py
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Win main.py
             OUT_FILE: dist/SmartDivider-Win.exe
           
-          - os: ubuntu-22.04 # 使用 22.04 兼顾速度和兼容性
+          - os: ubuntu-22.04
             TARGET: linux
-            # 【关键修复】针对 Linux 的 jaraco 报错，强制引入相关模块
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --hidden-import=pkg_resources.py2_warn --name SmartDivider-Linux main.py
+            # 针对 Linux，我们依然加上 collect-all jaraco 作为双重保险
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --collect-all jaraco --name SmartDivider-Linux main.py
             OUT_FILE: dist/SmartDivider-Linux
             
           - os: macos-latest
             TARGET: macos
-            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --hidden-import=jaraco.text --hidden-import=jaraco.classes --name SmartDivider-Mac main.py
+            CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Mac main.py
             OUT_FILE: dist/SmartDivider-Mac
 
     steps:
@@ -43,9 +42,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 显式安装 jaraco 相关库，确保环境里一定有
-          pip install jaraco.text jaraco.classes
+          
+          # 【核心修复在这里】
+          # 强制安装 70.0.0 版本以下的 setuptools
+          # 这彻底避开了 jaraco 的报错根源
+          pip install "setuptools<70.0.0"
+          
+          # 安装您的依赖
           pip install -r requirements.txt
+          
+          # 再次补充安装 jaraco，防止万一
+          pip install jaraco.text jaraco.classes jaraco.context jaraco.functools
 
       - name: Build with PyInstaller
         run: ${{ matrix.CMD_BUILD }}
