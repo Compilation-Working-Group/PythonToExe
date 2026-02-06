@@ -1,122 +1,82 @@
-name: Build Cross-Platform Gaokao Scorer
+name: Build SmartDivider
 
-# 触发器：手动触发，并提供选项选择需要编译的平台
 on:
-  workflow_dispatch:
-    inputs:
-      build_windows:
-        description: '编译 Windows 版本 (.exe)'
-        required: true
-        default: true
-        type: boolean
-      build_linux:
-        description: '编译 Linux 版本 (二进制)'
-        required: true
-        default: true
-        type: boolean
-      build_macos:
-        description: '编译 macOS 版本 (Unix Executable)'
-        required: true
-        default: true
-        type: boolean
+  push:
+    tags:
+      - 'v*' # 只有打 tag (如 v1.0) 时才触发构建，节省资源
+  workflow_dispatch: # 允许手动触发
 
 jobs:
-  # ==========================
-  # Job 1: Windows 构建
-  # ==========================
-  build-windows:
-    if: ${{ inputs.build_windows == true }}
-    runs-on: windows-latest
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            TARGET: windows
+            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Win main.py
+            OUT_FILE: dist/SmartDivider-Win.exe
+          - os: ubuntu-latest
+            TARGET: linux
+            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Linux main.py
+            OUT_FILE: dist/SmartDivider-Linux
+          - os: macos-latest
+            TARGET: macos
+            CMD_BUILD: pyinstaller --onefile --windowed --name SmartDivider-Mac main.py
+            OUT_FILE: dist/SmartDivider-Mac
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Check out code
+        uses: actions/checkout@v4
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        # 强制安装 pyinstaller 确保环境中有此工具
-        pip install pyinstaller
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # 推荐使用 3.10 或 3.11 保持稳定
 
-    - name: Build EXE
-      run: |
-        # --collect-all customtkinter: 确保打包了库里的主题文件
-        pyinstaller --noconsole --onefile --name "Gansu_Gaokao_Scorer_Win" --collect-all customtkinter main.py
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Upload Windows Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Gansu_Gaokao_Scorer_Windows
-        path: dist/Gansu_Gaokao_Scorer_Win.exe
+      - name: Build with PyInstaller
+        run: ${{ matrix.CMD_BUILD }}
 
-  # ==========================
-  # Job 2: Linux 构建
-  # ==========================
-  build-linux:
-    if: ${{ inputs.build_linux == true }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartDivider-${{ matrix.TARGET }}
+          path: ${{ matrix.OUT_FILE }}
+
+  release:
+    name: Create Release
+    needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
-    - uses: actions/checkout@v3
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartDivider-windows
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartDivider-linux
 
-    - name: Install System Dependencies (Tkinter)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-tk
+      - name: Download Mac Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartDivider-macos
 
-    - name: Install Python Dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-
-    - name: Build Linux Binary
-      run: |
-        # Linux下通常不加 --windowed 以便调试，或者加 --noconsole
-        pyinstaller --noconsole --onefile --name "Gansu_Gaokao_Scorer_Linux" --collect-all customtkinter main.py
-
-    - name: Upload Linux Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Gansu_Gaokao_Scorer_Linux
-        path: dist/Gansu_Gaokao_Scorer_Linux
-
-  # ==========================
-  # Job 3: macOS 构建
-  # ==========================
-  build-macos:
-    if: ${{ inputs.build_macos == true }}
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install Dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-
-    - name: Build macOS App
-      run: |
-        # macOS 推荐使用 --windowed
-        pyinstaller --windowed --onefile --name "Gansu_Gaokao_Scorer_Mac" --collect-all customtkinter main.py
-
-    - name: Upload macOS Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Gansu_Gaokao_Scorer_MacOS
-        # 上传生成的可执行文件
-        path: dist/Gansu_Gaokao_Scorer_Mac*
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            SmartDivider-Win.exe
+            SmartDivider-Linux
+            SmartDivider-Mac
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
