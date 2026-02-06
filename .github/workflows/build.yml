@@ -20,7 +20,7 @@ jobs:
             CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Win main.py
             OUT_FILE: dist/SmartDivider-Win.exe
           
-          - os: ubuntu-20.04  # 【关键修改1】使用旧版系统构建，兼容性更强
+          - os: ubuntu-22.04  # 【关键修改1】使用旧版系统构建，兼容性更强
             TARGET: linux
             # 【关键修改2】增加 --collect-all customtkinter
             CMD_BUILD: pyinstaller --onefile --windowed --collect-all customtkinter --name SmartDivider-Linux main.py
