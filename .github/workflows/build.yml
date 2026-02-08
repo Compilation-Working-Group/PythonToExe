@@ -1,7 +1,7 @@
-name: Build Periodic Table
+name: Build Paper Writer
 
 on: 
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,21 +26,20 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # 注意：name 改成了 PeriodicTable
       run: |
-        pyinstaller --name="PeriodicTable" --onefile --windowed --clean --collect-all customtkinter main.py
+        pyinstaller --name="PaperAI" --onefile --windowed --clean --collect-all customtkinter main.py
 
     - name: Rename Output
       shell: bash
       run: |
         if [ "${{ matrix.os }}" == "windows-latest" ]; then
-          mv dist/PeriodicTable.exe dist/PeriodicTable_Windows.exe
+          mv dist/PaperAI.exe dist/PaperAI_Windows.exe
         else
-          mv dist/PeriodicTable dist/PeriodicTable_${{ matrix.os }}
+          mv dist/PaperAI dist/PaperAI_${{ matrix.os }}
         fi
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PeriodicTable_${{ matrix.os }}
+        name: PaperAI_${{ matrix.os }}
         path: dist/
