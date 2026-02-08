@@ -1,5 +1,2 @@
 customtkinter
-pubchempy
-rdkit
-deep-translator
 pyinstaller
