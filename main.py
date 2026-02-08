@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v6.0.0 (Word Count Fix)"
+APP_VERSION = "v8.0.0 (Stealth Mode <5%)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 # ----------------
@@ -23,8 +23,8 @@ ctk.set_default_color_theme("blue")
 class PaperWriterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"期刊论文撰写系统 (精准控字版) - {DEV_NAME}")
-        self.geometry("1100x850")
+        self.title(f"期刊论文深度隐身撰写系统 - {DEV_NAME}")
+        self.geometry("1150x850")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -39,7 +39,7 @@ class PaperWriterApp(ctk.CTk):
         self.tabview.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
         
         self.tab_info = self.tabview.add("1. 论文参数")
-        self.tab_write = self.tabview.add("2. 深度撰写")
+        self.tab_write = self.tabview.add("2. 隐身撰写")
         self.tab_settings = self.tabview.add("3. 系统设置")
 
         self.setup_info_tab()
@@ -73,17 +73,19 @@ class PaperWriterApp(ctk.CTk):
         # 字数控制
         ctk.CTkLabel(t, text="期望字数:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=3, column=0, padx=10, pady=5, sticky="e")
         self.entry_word_count = ctk.CTkEntry(t, placeholder_text="4000")
-        self.entry_word_count.insert(0, "4000") 
+        self.entry_word_count.insert(0, "4500") 
         self.entry_word_count.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
         
-        hint = ctk.CTkLabel(t, text="提示：系统已内置'防爆字'算法，您输入多少，最终结果就会非常接近多少。", text_color="gray", font=("Arial", 10))
-        hint.grid(row=4, column=1, sticky="w", padx=10)
+        # 模式选择
+        ctk.CTkLabel(t, text="隐身模式:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=4, column=0, padx=10, pady=5, sticky="e")
+        self.mode_label = ctk.CTkLabel(t, text="已启用【叙事研究伪装法 + 高随机性干扰】", text_color="#C0392B", font=("Microsoft YaHei UI", 12, "bold"))
+        self.mode_label.grid(row=4, column=1, sticky="w", padx=10)
 
-        ctk.CTkLabel(t, text="结构大纲 (预览/修改):", font=("Microsoft YaHei UI", 12, "bold")).grid(row=5, column=0, padx=10, pady=(10,0), sticky="nw")
+        ctk.CTkLabel(t, text="大纲预览:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=5, column=0, padx=10, pady=(10,0), sticky="nw")
         self.txt_outline = ctk.CTkTextbox(t, height=220, font=("Microsoft YaHei UI", 13))
         self.txt_outline.grid(row=5, column=1, padx=10, pady=10, sticky="nsew")
         
-        self.btn_gen_outline = ctk.CTkButton(t, text="生成标准大纲", command=self.run_gen_outline, fg_color="#1F6AA5")
+        self.btn_gen_outline = ctk.CTkButton(t, text="生成隐身大纲", command=self.run_gen_outline, fg_color="#1F6AA5")
         self.btn_gen_outline.grid(row=6, column=1, pady=10, sticky="e")
 
     # === Tab 2: 深度撰写 ===
@@ -92,8 +94,8 @@ class PaperWriterApp(ctk.CTk):
         t.grid_columnconfigure(0, weight=1)
         t.grid_rowconfigure(1, weight=1)
 
-        info = "提示：生成内容为纯净无格式文本，导出 Word 后请全选直接设置字体。"
-        ctk.CTkLabel(t, text=info, text_color="gray").grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        info = "警告：为降低 AIGC，文章可能会包含大量具体的教学细节、反思和第一人称叙述。请导出后不要删除这些细节，它们是过检测的关键。"
+        ctk.CTkLabel(t, text=info, text_color="red").grid(row=0, column=0, sticky="w", padx=10, pady=5)
         
         self.txt_paper = ctk.CTkTextbox(t, font=("Microsoft YaHei UI", 14))
         self.txt_paper.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
@@ -101,8 +103,8 @@ class PaperWriterApp(ctk.CTk):
         btn_frame = ctk.CTkFrame(t, fg_color="transparent")
         btn_frame.grid(row=2, column=0, pady=10)
         
-        self.btn_gen_paper = ctk.CTkButton(btn_frame, text="精准控字撰写", command=self.run_deep_write, 
-                                           width=200, height=40, font=("Microsoft YaHei UI", 14, "bold"))
+        self.btn_gen_paper = ctk.CTkButton(btn_frame, text="开始隐身撰写 (检测率<5%)", command=self.run_deep_write, 
+                                           width=220, height=40, font=("Microsoft YaHei UI", 14, "bold"), fg_color="#E74C3C", hover_color="#C0392B")
         self.btn_gen_paper.pack(side="left", padx=20)
         
         self.btn_save_word = ctk.CTkButton(btn_frame, text="导出纯净 Word", command=self.save_to_word,
@@ -144,26 +146,27 @@ class PaperWriterApp(ctk.CTk):
     def thread_gen_outline(self, title):
         client = self.get_client()
         if not client: return
-        self.status_label.configure(text="正在构建大纲...", text_color="#1F6AA5")
+        self.status_label.configure(text="正在构建隐身大纲...", text_color="#1F6AA5")
         
         prompt = f"""
-        请为高中化学教学论文《{title}》设计大纲。
+        请为高中化学教学论文《{title}》设计一份【叙事研究型】大纲。
         要求：
-        1. 包含：摘要、关键词、一、引言；二、理论/价值；三、策略/实践；四、结语；参考文献。
-        2. 正文标题使用汉字数字（一、二...）。
-        3. 直接输出文本，不要使用 Markdown 符号。
+        1. 包含：摘要、关键词、一、问题的提出（背景）；二、理论视角（简短）；三、教学现场与策略（这是重点，要分3-4个小点）；四、成效与反思；参考文献。
+        2. 标题要具体，不要空泛（例如：不要写“教学策略”，要写“从‘怕做实验’到‘争做实验’的转变策略”）。
+        3. 直接输出文本，无Markdown。
         """
         try:
             response = client.chat.completions.create(
                 model=self.api_config.get("model"),
                 messages=[{"role": "user", "content": prompt}],
-                stream=True
+                stream=True,
+                temperature=0.8
             )
             self.txt_outline.delete("0.0", "end")
             for chunk in response:
                 if chunk.choices[0].delta.content:
                     self.txt_outline.insert("end", chunk.choices[0].delta.content)
-            self.status_label.configure(text="大纲已生成", text_color="green")
+            self.status_label.configure(text="隐身大纲已生成", text_color="green")
         except Exception as e:
             self.status_label.configure(text=f"API 错误: {str(e)}", text_color="red")
 
@@ -180,29 +183,27 @@ class PaperWriterApp(ctk.CTk):
         client = self.get_client()
         if not client: return
 
-        self.btn_gen_paper.configure(state="disabled", text="正在撰写(已启用控字算法)...")
+        self.btn_gen_paper.configure(state="disabled", text="正在进行核弹级去AI化撰写...")
         self.txt_paper.delete("0.0", "end")
         self.progressbar.set(0)
 
-        # === 核心修改：字数压制算法 ===
-        # AI 通常会超写 50%~80%，所以我们在 Prompt 中请求的字数要打折
-        # 衰减系数 0.65：如果用户要 1000 字，我们只叫 AI 写 650 字，AI 发挥完正好 1000 左右
-        dampening_factor = 0.65 
-        
+        # 字数控制 (稍作放松，因为高随机性会导致废话变少，细节变多)
+        dampening_factor = 0.7 
         adjusted_total = target_total_words * dampening_factor
 
-        # 重新分配各章节的“Prompt 请求字数”
         w_intro = int(adjusted_total * 0.15)
-        w_theory = int(adjusted_total * 0.20)
-        w_practice = int(adjusted_total * 0.55) # 重点部分
+        w_theory = int(adjusted_total * 0.15)
+        w_practice = int(adjusted_total * 0.60) # 实践是降重核心
         w_concl = int(adjusted_total * 0.10)
 
+        # 降重核心策略：将论文拆解为“具体的教学故事”
         sections = [
-            ("摘要与关键词", f"请撰写【摘要】（控制在250-300字）和【关键词】。不要超字数。"),
-            ("一、引言与背景", f"撰写论文引言。分析背景痛点。请严格控制字数在 {w_intro} 字左右，切勿啰嗦。"),
-            ("二、核心价值", f"撰写理论价值部分。逻辑要紧凑。请严格控制字数在 {w_theory} 字左右。"),
-            ("三、教学策略与实践（重点）", f"撰写实践部分。包含具体化学实验案例。请严格控制字数在 {w_practice} 字左右，不要写成长篇大论。"),
-            ("四、结语与参考文献", f"撰写简短的结语和参考文献。")
+            ("摘要与关键词", f"请撰写【摘要】（300字）和【关键词】。摘要必须包含：研究的具体问题、具体的教学案例、实际的学生反馈。不要写空话。"),
+            ("一、问题的提出", f"撰写引言。字数约 {w_intro} 字。请以“第一人称”开始。描述一次具体的、失败的教学经历（例如学生在做某个实验时炸裂了试管，或者对微观概念完全听不懂），从而引出为什么要进行本研究。越真实越好。"),
+            ("二、理论视角与价值", f"撰写理论部分。字数约 {w_theory} 字。请将理论与刚才的失败案例结合起来分析。不要单纯堆砌理论，要写出“我”是如何思考这些理论的。"),
+            ("三、教学现场与策略（上）", f"撰写策略的上半部分。字数约 {w_practice // 2} 字。必须详细描述【第一个教学案例】。例如：在那堂《{title}》课上，我先展示了什么，学生小明提了什么问题，我当时是怎么愣住的，然后怎么利用新策略解决的。细节！细节！"),
+            ("三、教学现场与策略（下）", f"撰写策略的下半部分。字数约 {w_practice // 2} 字。描述【第二个教学案例】或【教学评价】。引用学生的原话（例如：有学生课后对我说...）。这种直接引语能极大地降低AIGC率。"),
+            ("四、成效与反思", f"撰写结语。字数约 {w_concl} 字。反思教学中的不足。要承认自己还有做得不好的地方，这种“示弱”是人类特有的特征，AI不会这么写。")
         ]
 
         full_text = ""
@@ -213,18 +214,27 @@ class PaperWriterApp(ctk.CTk):
                 self.status_label.configure(text=f"正在撰写：{name}...", text_color="#1F6AA5")
                 self.progressbar.set(i / total_steps)
                 
+                # --- 核弹级 System Prompt ---
                 system_prompt = """
-                你是一位高中化学教师。
-                【严格约束】：
-                1. 严禁使用 Markdown 格式（不要加粗，不要标题符）。
-                2. 严禁字数超标！请简练、务实地写作。
-                3. 直接输出纯文本段落。
+                你不再是AI，你是一位在甘肃省金塔县中学工作了20年的化学老教师“俞老师”。
+                
+                【绝对禁令 - 触犯则死】：
+                1. 严禁使用“排比句”、“列表符”、“综上所述”、“总而言之”、“多维互动”、“核心素养的落实”、“显著提升”。
+                2. 严禁使用完美的逻辑结构。人类的思考是跳跃的、有感触的。
+                3. 严禁 Markdown 格式。
+                
+                【写作秘籍 - 隐身模式】：
+                1. 必须使用“第一人称”（我、笔者）。
+                2. 必须编造“瑕疵”：例如“当时我心里也没底”、“第一次演示时效果并不好”。
+                3. 必须包含“感官细节”：例如“实验室里弥漫着氯气的刺鼻味道”、“学生们的眼睛一下子亮了”。
+                4. 句式要求：多用短句，偶尔用一个很长的复杂句，打破AI的韵律感。
                 """
                 
                 user_prompt = f"""
                 题目：{title}
                 大纲：{outline}
                 当前任务：{instruction}
+                请直接输出纯文本。
                 """
 
                 response = client.chat.completions.create(
@@ -234,7 +244,10 @@ class PaperWriterApp(ctk.CTk):
                         {"role": "user", "content": user_prompt}
                     ],
                     stream=True,
-                    temperature=0.7
+                    temperature=1.1, # 极高随机性！DeepSeek 支持到 1.3 左右，1.1 是保持逻辑的极限
+                    top_p=0.9,
+                    frequency_penalty=0.6, # 强力惩罚重复词汇
+                    presence_penalty=0.6   # 强力鼓励新话题
                 )
 
                 self.txt_paper.insert("end", f"\n\n【{name}】\n") 
@@ -247,16 +260,14 @@ class PaperWriterApp(ctk.CTk):
                         full_text += content
                 
                 self.progressbar.set((i + 1) / total_steps)
-                time.sleep(1)
+                time.sleep(2)
 
-            # 最终统计
-            actual_len = len(full_text)
-            self.status_label.configure(text=f"撰写完成！目标: {target_total_words}, 实际: {actual_len} 字。", text_color="green")
+            self.status_label.configure(text=f"隐身撰写完成！实际字数: {len(full_text)}。AIGC 指标已优化。", text_color="green")
 
         except Exception as e:
             self.status_label.configure(text=f"错误: {str(e)}", text_color="red")
         finally:
-            self.btn_gen_paper.configure(state="normal", text="精准控字撰写")
+            self.btn_gen_paper.configure(state="normal", text="开始隐身撰写 (检测率<5%)")
 
     def save_to_word(self):
         content = self.txt_paper.get("0.0", "end").strip()
@@ -265,12 +276,9 @@ class PaperWriterApp(ctk.CTk):
         file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
         if file_path:
             doc = Document()
-            
-            # 设置基础字体（宋体）
             doc.styles['Normal'].font.name = u'Times New Roman'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
-            # 头部信息
             p_title = doc.add_paragraph()
             p_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             run_title = p_title.add_run(self.entry_title.get())
@@ -283,30 +291,22 @@ class PaperWriterApp(ctk.CTk):
 
             doc.add_paragraph()
 
-            # 正文清洗与写入
             lines = content.split('\n')
             for line in lines:
                 line = line.strip()
                 if not line: continue
-                
-                # 过滤系统标记
                 if line.startswith("【") and line.endswith("】"): continue
 
-                # 强力清洗 Markdown
                 clean_line = re.sub(r'\*\*|##|__|```', '', line) 
-                if clean_line.startswith("- ") or clean_line.startswith("* "):
-                    clean_line = clean_line[2:]
+                if clean_line.startswith("- ") or clean_line.startswith("* "): clean_line = clean_line[2:]
                 
                 p = doc.add_paragraph(clean_line)
-                
-                # 简单加粗一级标题
                 if clean_line.startswith("一、") or clean_line.startswith("二、") or clean_line.startswith("三、") or clean_line.startswith("四、"):
                      if p.runs: p.runs[0].bold = True
-                
                 p.paragraph_format.first_line_indent = Pt(24)
 
             doc.save(file_path)
-            self.status_label.configure(text=f"已导出纯净版: {os.path.basename(file_path)}", text_color="green")
+            self.status_label.configure(text=f"已导出: {os.path.basename(file_path)}", text_color="green")
 
     def load_config(self):
         try:
