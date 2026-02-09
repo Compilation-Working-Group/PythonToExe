@@ -12,6 +12,16 @@ import json
 import time
 import re
 
+# --- 新增库用于处理 PDF 和 Excel ---
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
 # --- Linux 显示修正 ---
 if sys.platform.startswith('linux'):
     try:
@@ -23,7 +33,7 @@ if sys.platform.startswith('linux'):
             os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v28.0.0 (Reference Upload + Anti-Duplication)"
+APP_VERSION = "v29.0.0 (Multi-Format Support)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 
@@ -92,7 +102,7 @@ class MasterWriterApp(ctk.CTk):
         }
         self.load_config()
         self.stop_event = threading.Event()
-        self.reference_content = "" # 存储参考文档内容
+        self.reference_content = "" 
 
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
@@ -108,7 +118,6 @@ class MasterWriterApp(ctk.CTk):
         t.grid_columnconfigure(1, weight=1)
         t.grid_rowconfigure(6, weight=1) 
 
-        # 顶部控制区
         ctrl_frame = ctk.CTkFrame(t, fg_color="transparent")
         ctrl_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
         
@@ -122,37 +131,33 @@ class MasterWriterApp(ctk.CTk):
         self.entry_words.insert(0, "3000")
         self.entry_words.pack(side="left", padx=5)
 
-        # 标题
         ctk.CTkLabel(t, text="文章标题:", font=("bold", 12)).grid(row=1, column=0, padx=10, sticky="e")
         self.entry_topic = ctk.CTkEntry(t, width=600)
         self.entry_topic.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-        # 参考文档上传区 (新增)
+        # --- 升级版参考资料上传区 ---
         ctk.CTkLabel(t, text="参考资料:", font=("bold", 12)).grid(row=2, column=0, padx=10, sticky="e")
         ref_frame = ctk.CTkFrame(t, fg_color="transparent")
         ref_frame.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
         
-        self.btn_upload = ctk.CTkButton(ref_frame, text="📂 上传参考文档 (.docx/.txt)", command=self.load_reference_file, width=200, fg_color="#E67E22")
+        self.btn_upload = ctk.CTkButton(ref_frame, text="📂 上传资料 (PDF/Word/Excel...)", command=self.load_reference_file, width=220, fg_color="#E67E22")
         self.btn_upload.pack(side="left", padx=5)
         
-        self.lbl_ref_status = ctk.CTkLabel(ref_frame, text="未上传 (AI将基于通用知识写作)", text_color="gray")
+        self.lbl_ref_status = ctk.CTkLabel(ref_frame, text="支持 .pdf .docx .xlsx .txt .md .csv 等", text_color="gray")
         self.lbl_ref_status.pack(side="left", padx=10)
 
-        # 指令区
         ctk.CTkLabel(t, text="具体指令:", font=("bold", 12)).grid(row=3, column=0, padx=10, sticky="ne")
         self.txt_instructions = ctk.CTkTextbox(t, height=50, font=("Arial", 12))
         self.txt_instructions.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkFrame(t, height=2, fg_color="gray").grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
 
-        # 双面板
         self.paned_frame = ctk.CTkFrame(t, fg_color="transparent")
         self.paned_frame.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=5)
         self.paned_frame.grid_columnconfigure(0, weight=1) 
         self.paned_frame.grid_columnconfigure(1, weight=2) 
         self.paned_frame.grid_rowconfigure(1, weight=1)
 
-        # 左侧大纲
         outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         outline_frame.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(outline_frame, text="Step 1: 智能大纲 (AI根据题目生成)", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
@@ -166,7 +171,6 @@ class MasterWriterApp(ctk.CTk):
         self.btn_gen_outline.pack(side="left", padx=5)
         ctk.CTkButton(btn_o_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
 
-        # 右侧正文
         content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         content_frame.grid(row=0, column=1, sticky="ew")
         ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (参考资料已挂载)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
@@ -209,32 +213,74 @@ class MasterWriterApp(ctk.CTk):
         self.entry_model.pack(pady=5)
         ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
 
-    # --- 逻辑控制 ---
-
+    # --- 核心功能：多格式文件读取 ---
     def load_reference_file(self):
-        filepath = filedialog.askopenfilename(filetypes=[("Documents", "*.docx *.txt")])
+        filetypes = [
+            ("All Supported", "*.docx *.pdf *.xlsx *.txt *.md *.csv *.py *.json"),
+            ("Word", "*.docx"),
+            ("PDF", "*.pdf"),
+            ("Excel", "*.xlsx"),
+            ("Text", "*.txt *.md")
+        ]
+        filepath = filedialog.askopenfilename(filetypes=filetypes)
         if not filepath: return
         
+        filename = os.path.basename(filepath)
+        ext = os.path.splitext(filepath)[1].lower()
+        content = ""
+        
         try:
-            content = ""
-            if filepath.endswith(".docx"):
+            # 1. Word (.docx)
+            if ext == ".docx":
                 doc = Document(filepath)
                 content = "\n".join([p.text for p in doc.paragraphs])
+            
+            # 2. PDF (.pdf)
+            elif ext == ".pdf":
+                if pypdf is None:
+                    raise ImportError("缺少 pypdf 库，无法读取PDF")
+                reader = pypdf.PdfReader(filepath)
+                for page in reader.pages:
+                    content += page.extract_text() + "\n"
+            
+            # 3. Excel (.xlsx)
+            elif ext in [".xlsx", ".xls"]:
+                if openpyxl is None:
+                    raise ImportError("缺少 openpyxl 库，无法读取Excel")
+                wb = openpyxl.load_workbook(filepath, data_only=True)
+                # 遍历所有Sheet，把数据展平为文本
+                for sheet in wb:
+                    content += f"--- Sheet: {sheet.title} ---\n"
+                    for row in sheet.iter_rows(values_only=True):
+                        # 过滤None值，将一行转为字符串
+                        row_text = " ".join([str(cell) for cell in row if cell is not None])
+                        if row_text.strip():
+                            content += row_text + "\n"
+            
+            # 4. 纯文本/代码 (.txt, .md, .py, .csv, .json)
             else:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    content = f.read()
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    # 尝试用 GBK 读取 (针对旧的中文文档)
+                    with open(filepath, "r", encoding="gbk") as f:
+                        content = f.read()
+
+            # 处理内容长度
+            content = content.strip()
+            if not content:
+                raise ValueError("文件内容为空或无法识别")
+                
+            self.reference_content = content[:10000] # 限制1万字上下文
+            if len(content) > 10000:
+                self.reference_content += "\n...(内容过长，截取前10000字)"
             
-            # 限制参考资料长度（防止超token），取前8000字通常够用
-            self.reference_content = content[:8000]
-            if len(content) > 8000:
-                self.reference_content += "\n...(内容过长已截断)"
-            
-            filename = os.path.basename(filepath)
-            self.lbl_ref_status.configure(text=f"已加载: {filename} ({len(self.reference_content)}字)", text_color="green")
-            messagebox.showinfo("成功", f"参考文档加载成功！\nAI将在撰写时深度参考此内容。")
+            self.lbl_ref_status.configure(text=f"已挂载: {filename} ({len(self.reference_content)}字)", text_color="green")
+            messagebox.showinfo("成功", f"文件《{filename}》解析成功！\n内容已存入AI大脑，将在撰写时自动引用。")
             
         except Exception as e:
-            messagebox.showerror("错误", f"读取文件失败: {str(e)}")
+            messagebox.showerror("读取失败", f"无法读取文件: {str(e)}\n如果是特殊格式，请先转为TXT。")
 
     def on_mode_change(self, choice):
         config = STYLE_GUIDE.get(choice, STYLE_GUIDE["自由定制"])
@@ -266,7 +312,6 @@ class MasterWriterApp(ctk.CTk):
             return None
         return OpenAI(api_key=key, base_url=base)
 
-    # --- 生成大纲 ---
     def run_gen_outline(self):
         self.stop_event.clear()
         topic = self.entry_topic.get().strip()
@@ -287,7 +332,7 @@ class MasterWriterApp(ctk.CTk):
         
         ref_hint = ""
         if self.reference_content:
-            ref_hint = f"【参考资料概览】：用户上传了参考资料，大概内容是：{self.reference_content[:300]}... 请结合这些内容设计大纲。"
+            ref_hint = f"【参考资料背景】：用户上传了文档，包含关键词：{self.reference_content[:200]}... 请尝试结合这些内容设计大纲。"
 
         prompt = f"""
         任务：为《{topic}》写一份【{mode}】的详细大纲。
@@ -320,7 +365,6 @@ class MasterWriterApp(ctk.CTk):
         finally:
             self.btn_gen_outline.configure(state="normal")
 
-    # --- 撰写全文 ---
     def run_full_write(self):
         self.stop_event.clear()
         outline_raw = self.txt_outline.get("0.0", "end").strip()
@@ -330,7 +374,6 @@ class MasterWriterApp(ctk.CTk):
             
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
         
-        # 智能滤除标题行
         if len(lines) > 0:
             first_line = lines[0]
             topic = self.entry_topic.get().strip()
@@ -353,7 +396,7 @@ class MasterWriterApp(ctk.CTk):
         if current_task: tasks.append(current_task)
 
         if not tasks:
-            self.status_label.configure(text="大纲格式无法识别（需包含'一、'或'摘要'）", text_color="red")
+            self.status_label.configure(text="大纲格式无法识别", text_color="red")
             return
 
         topic = self.entry_topic.get()
@@ -386,18 +429,22 @@ class MasterWriterApp(ctk.CTk):
 
         last_paragraph = "（文章刚开始，暂无上文）"
 
-        # 构建参考资料 Prompt
+        # 构建参考资料Prompt
         ref_prompt_block = ""
         if self.reference_content:
             ref_prompt_block = f"""
             【重要参考资料】：
-            以下是用户提供的核心参考材料，请务必在撰写中深度结合、引用或模仿其观点/数据（但不要原文照抄）：
+            以下是用户上传的辅助材料，请在撰写时：
+            1. 积极引用其中的数据、案例或观点。
+            2. 模仿其文风或专业术语的使用。
+            3. 但不要原文照抄，要进行改写和融合。
+            
+            资料内容摘要：
             {self.reference_content}
             ------------------------------------------------
             """
 
         def get_core_text(t):
-            # 提取汉字和数字作为语义指纹
             return re.sub(r'[^\u4e00-\u9fa50-9]', '', t)
 
         try:
@@ -467,38 +514,27 @@ class MasterWriterApp(ctk.CTk):
                         content = chunk.choices[0].delta.content
                         temp_text = current_section_text + content
                         
-                        # === 摘要特殊处理 ===
                         if "摘要" in header:
                             if len(temp_text) < 10 and ("摘" in temp_text or "要" in temp_text):
                                 current_section_text += content
                                 continue 
                             clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
                             self.txt_content.insert("end", clean_chunk)
-                        
-                        # === 正文双重标题熔断 ===
                         else:
-                            header_fingerprint = get_core_text(header) # 系统标题指纹
-                            temp_fingerprint = get_core_text(temp_text) # AI输出指纹
+                            header_fingerprint = get_core_text(header)
+                            temp_fingerprint = get_core_text(temp_text)
                             
-                            # 如果 AI 输出的前 50 个字里，包含了系统标题的指纹
-                            # 比如 Header="四、改进措施", AI="4. 改进措施..." -> 指纹匹配！
                             if len(temp_text) < 50 and header_fingerprint in temp_fingerprint:
-                                current_section_text += content # 暂存，不上屏
+                                current_section_text += content
                             else:
-                                # 危险期已过，或者确实不是标题
                                 if len(current_section_text) > 0 and len(current_section_text) < 50:
-                                    # 再次确认暂存区是不是标题
                                     if header_fingerprint in get_core_text(current_section_text):
-                                        # 确实是标题重复！丢弃！
-                                        # 尝试保留换行后的内容
                                         parts = current_section_text.split('\n', 1)
                                         if len(parts) > 1:
                                             self.txt_content.insert("end", parts[1] + content)
                                         else:
-                                            # 全是标题，全丢，只输新内容
                                             self.txt_content.insert("end", content)
                                     else:
-                                        # 误判，补上
                                         self.txt_content.insert("end", current_section_text + content)
                                     current_section_text = "SAFE" 
                                 else:
