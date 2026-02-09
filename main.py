@@ -4,14 +4,121 @@ import json
 import re
 import datetime
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 from docx import Document
 
 APP_NAME = "PaperWriter"
 APP_ORG = "YuJinQuanLab"
 SETTINGS_FILE = "settings.json"
+
+# DeepSeek defaults (OpenAI-compatible API) [6](https://cloud.tencent.com/document/product/1772/115969)
+DEFAULT_API_BASE = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-chat"
+
+
+# ---------------------------
+# Linux preflight & Qt env fixups
+# ---------------------------
+def linux_preflight_check():
+    """
+    Check critical runtime libs before creating QApplication to avoid Qt core dump.
+    Qt 6.5+ needs libxcb-cursor0 to load xcb platform plugin. [1](https://www.cnblogs.com/gccbuaa/p/19254097)[2](https://github.com/pyinstaller/pyinstaller/issues/5414)
+    """
+    if not sys.platform.startswith("linux"):
+        return
+
+    import ctypes
+    required = [
+        ("libxcb-cursor.so.0", "sudo apt update && sudo apt install -y libxcb-cursor0"),
+    ]
+    missing = []
+    for so_name, hint in required:
+        try:
+            ctypes.CDLL(so_name)
+        except OSError:
+            missing.append((so_name, hint))
+
+    if missing:
+        msg_lines = [
+            "启动失败：系统缺少 Qt(xcb) 运行所需动态库。",
+            "",
+            "缺少：",
+        ]
+        for so_name, hint in missing:
+            msg_lines.append(f"  - {so_name}")
+        msg_lines += [
+            "",
+            "在 Ubuntu/Debian 上可执行：",
+        ]
+        # 去重提示
+        hints = sorted(set(hint for _, hint in missing))
+        for h in hints:
+            msg_lines.append(f"  {h}")
+        msg_lines += [
+            "",
+            "说明：Qt 6.5+ 加载 xcb 平台插件需要该库，否则会出现：",
+            "  'From 6.5.0, xcb-cursor0 or libxcb-cursor0 is needed...'",
+        ]
+        print("\n".join(msg_lines), file=sys.stderr)
+        sys.exit(1)
+
+
+def _find_pyside_qt_plugins_dir() -> Optional[str]:
+    try:
+        import PySide6
+        base = os.path.dirname(PySide6.__file__)
+        qt_plugins = os.path.join(base, "Qt", "plugins")
+        return qt_plugins if os.path.isdir(qt_plugins) else None
+    except Exception:
+        return None
+
+
+def _choose_qt_im_module(qt_plugins_dir: Optional[str]) -> Optional[str]:
+    """
+    Prefer fcitx if its plugin exists, otherwise ibus.
+    Reason: PySide6 commonly includes ibus plugin but not fcitx plugin,
+    causing Chinese input failure on fcitx5 systems. [3](https://blog.csdn.net/gitblog_00511/article/details/148916652)[4](https://deepwiki.com/pypa/cibuildwheel/4.1-github-actions-integration)
+    """
+    if not qt_plugins_dir:
+        return None
+    pic_dir = os.path.join(qt_plugins_dir, "platforminputcontexts")
+    if not os.path.isdir(pic_dir):
+        return None
+
+    files = set(os.listdir(pic_dir))
+    has_fcitx = any("fcitx" in f and f.endswith(".so") for f in files)
+    has_ibus = any("ibus" in f and f.endswith(".so") for f in files)
+
+    if has_fcitx:
+        return "fcitx"
+    if has_ibus:
+        return "ibus"
+    return None
+
+
+def qt_env_fixups():
+    """
+    Make Qt find its plugins when packaged (PyInstaller).
+    Also set QT_IM_MODULE based on available input context plugins.
+    """
+    qt_plugins = _find_pyside_qt_plugins_dir()
+    if qt_plugins:
+        # Ensure Qt can find plugins/platforms in frozen app
+        os.environ.setdefault("QT_PLUGIN_PATH", qt_plugins)
+        os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", os.path.join(qt_plugins, "platforms"))
+        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "qt6ct")  # harmless if absent
+
+        # Pick input method module if user didn't set it
+        if not os.environ.get("QT_IM_MODULE"):
+            chosen = _choose_qt_im_module(qt_plugins)
+            if chosen:
+                os.environ["QT_IM_MODULE"] = chosen
+
+    # Do not override user's env if already set; only set safe defaults
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("XMODIFIERS", os.environ.get("XMODIFIERS", "@im=fcitx"))
 
 
 # ---------------------------
@@ -51,10 +158,6 @@ def clamp_text(s: str, max_len: int = 12000) -> str:
 
 
 def parse_kv_instructions(text: str) -> Dict[str, str]:
-    """
-    解析形如：体裁=论文; 语言=中文; 字数=2000
-    也兼容换行/中文分号/逗号。
-    """
     d = {}
     if not text.strip():
         return d
@@ -69,21 +172,23 @@ def parse_kv_instructions(text: str) -> Dict[str, str]:
 
 
 # ---------------------------
-# LLM Client (OpenAI-compatible)
+# LLM Client (OpenAI-compatible; DeepSeek supported)
 # ---------------------------
 @dataclass
 class LLMConfig:
-    api_base: str = ""
+    api_base: str = DEFAULT_API_BASE
     api_key: str = ""
-    model: str = "gpt-4o-mini"
+    model: str = DEFAULT_MODEL
     temperature: float = 0.6
     max_tokens: int = 1800
 
 
 class OpenAICompatClient:
     """
-    仅使用标准库 urllib 实现一个 OpenAI 兼容 Chat Completions 客户端：
-    POST {api_base}/v1/chat/completions
+    OpenAI-compatible Chat Completions client.
+    DeepSeek docs: base_url can be https://api.deepseek.com (or /v1 for compatibility),
+    endpoint is /chat/completions, models deepseek-chat / deepseek-reasoner. [6](https://cloud.tencent.com/document/product/1772/115969)
+    For standard OpenAI-style base (e.g., https://api.openai.com), endpoint is /v1/chat/completions.
     """
     def __init__(self, cfg: LLMConfig, logger):
         self.cfg = cfg
@@ -92,16 +197,29 @@ class OpenAICompatClient:
     def is_ready(self) -> bool:
         return bool(self.cfg.api_base.strip()) and bool(self.cfg.api_key.strip()) and bool(self.cfg.model.strip())
 
+    def _build_url(self) -> str:
+        base = self.cfg.api_base.rstrip("/")
+        # If user already uses /v1, do not duplicate it.
+        if base.endswith("/v1"):
+            return base + "/chat/completions"
+
+        # DeepSeek canonical endpoint uses /chat/completions under base_url. [6](https://cloud.tencent.com/document/product/1772/115969)
+        if "api.deepseek.com" in base:
+            return base + "/chat/completions"
+
+        # Default OpenAI-compatible pattern
+        return base + "/v1/chat/completions"
+
     def chat(self, messages: List[Dict[str, str]]) -> str:
         import urllib.request
 
-        base = self.cfg.api_base.rstrip("/")
-        url = base + "/v1/chat/completions"
+        url = self._build_url()
         payload = {
             "model": self.cfg.model,
             "messages": messages,
             "temperature": self.cfg.temperature,
             "max_tokens": self.cfg.max_tokens,
+            "stream": False,
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
@@ -110,14 +228,10 @@ class OpenAICompatClient:
 
         self.logger(f"[{now_str()}] 调用 LLM: {url} | model={self.cfg.model}")
 
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-            obj = json.loads(raw)
-            return obj["choices"][0]["message"]["content"].strip()
-        except Exception as e:
-            self.logger(f"[{now_str()}] LLM 调用失败：{e}")
-            raise
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        obj = json.loads(raw)
+        return obj["choices"][0]["message"]["content"].strip()
 
 
 # ---------------------------
@@ -182,23 +296,16 @@ DEFAULT_OUTLINE_TEMPLATES = {
 
 
 def outline_to_markdown(lines: List[str]) -> str:
-    # 用 Markdown 标题表示层级：简单起见全部做二级标题
     md = []
     for s in lines:
         s = s.strip()
         if not s:
             continue
-        if re.match(r"^\d+(\.\d+)*\s+", s):
-            md.append(f"## {s}")
-        elif s.startswith(("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、")):
-            md.append(f"## {s}")
-        else:
-            md.append(f"## {s}")
+        md.append(f"## {s}")
     return "\n".join(md).strip() + "\n"
 
 
 def split_outline_markdown(md: str) -> List[str]:
-    # 从 markdown 标题提取章节列表
     lines = []
     for line in md.splitlines():
         line = line.strip()
@@ -207,14 +314,12 @@ def split_outline_markdown(md: str) -> List[str]:
             if title:
                 lines.append(title)
     if not lines:
-        # 兜底：按非空行
         lines = [x.strip() for x in md.splitlines() if x.strip()]
     return lines
 
 
 def rule_based_outline(title: str, genre: str, instructions: str) -> str:
     base = DEFAULT_OUTLINE_TEMPLATES.get(genre, DEFAULT_OUTLINE_TEMPLATES["自定义"])
-    # 把题目插入开头
     lines = base.copy()
     if lines and lines[0] in ("题目", "标题"):
         lines[0] = f"{lines[0]}：{title}" if title else lines[0]
@@ -222,11 +327,10 @@ def rule_based_outline(title: str, genre: str, instructions: str) -> str:
         if title:
             lines.insert(0, f"标题：{title}")
 
-    # 根据指令做一点点智能扩展
     kv = parse_kv_instructions(instructions)
     if genre == "论文":
-        structure = kv.get("结构", "").upper()
-        if "IMRAD" in structure or "IMRaD" in structure:
+        structure = (kv.get("结构", "") or "").upper()
+        if "IMRAD" in structure:
             lines = [
                 f"题目：{title}" if title else "题目",
                 "摘要",
@@ -256,10 +360,9 @@ def rule_based_draft(title: str, genre: str, outline_md: str, instructions: str)
     body = []
     for sec in sections:
         body.append(f"## {sec}\n")
-        # 给不同体裁写一些占位内容
         if genre == "论文":
             if "摘要" in sec:
-                body.append("（在此用150~300字概括研究背景、方法、主要发现与结论。）\n")
+                body.append("（150~300字概括研究背景、方法、主要发现与结论。）\n")
             elif "关键词" in sec:
                 body.append("关键词：___；___；___；___\n")
             elif "引言" in sec:
@@ -273,12 +376,11 @@ def rule_based_draft(title: str, genre: str, outline_md: str, instructions: str)
             elif "结论" in sec:
                 body.append("（总结主要结论、贡献、应用价值与未来工作。）\n")
             elif "参考文献" in sec:
-                body.append("（此处放置参考文献占位符：\n- [1] 作者. 题目. 期刊, 年, 卷(期): 页码.\n- [2] ...）\n")
+                body.append("（参考文献占位符：\n- [1] 作者. 题目. 期刊, 年, 卷(期): 页码.\n- [2] ...）\n")
             else:
                 body.append("（按该小节主题展开论述，建议每节2~4段。）\n")
         else:
             body.append("（围绕该小节主题写1~3段，尽量给出事实、证据与可执行建议。）\n")
-
         body.append("\n")
 
     return intro + "".join(body)
@@ -290,18 +392,17 @@ class WriterEngine:
         self.logger = logger
 
     def gen_outline(self, title: str, genre: str, instructions: str) -> str:
-        # 有 LLM 就用 LLM；否则模板
         if self.llm and self.llm.is_ready():
             sys_prompt = (
                 "你是一个专业写作助手。用户会给出题目、体裁与要求。"
-                "你的任务：生成可编辑的中文Markdown大纲。"
+                "任务：生成可编辑的中文Markdown大纲。"
                 "要求：层级清晰，章节标题具体，不要写正文，不要写多余解释。"
             )
             user_prompt = (
                 f"题目：{title}\n"
                 f"体裁：{genre}\n"
                 f"写作要求：{instructions}\n\n"
-                "请输出Markdown大纲（使用 #/##/### 标题），适合直接扩写为完整文稿。"
+                "输出Markdown大纲（使用 #/##/### 标题），适合直接扩写为完整文稿。"
             )
             try:
                 out = self.llm.chat([
@@ -309,25 +410,24 @@ class WriterEngine:
                     {"role": "user", "content": user_prompt},
                 ])
                 return clamp_text(out, 12000)
-            except Exception:
-                self.logger(f"[{now_str()}] 回退到离线模板生成大纲。")
+            except Exception as e:
+                self.logger(f"[{now_str()}] LLM 调用失败，回退离线模板：{e}")
                 return rule_based_outline(title, genre, instructions)
-        else:
-            return rule_based_outline(title, genre, instructions)
+        return rule_based_outline(title, genre, instructions)
 
     def write_full(self, title: str, genre: str, outline_md: str, instructions: str) -> str:
         if self.llm and self.llm.is_ready():
             sys_prompt = (
                 "你是一个专业写作助手。你将根据用户的大纲生成完整文稿。"
                 "要求：结构与大纲一致，语言为中文（除非指令指定），表达严谨、连贯。"
-                "如果需要引用，用[1][2]形式做占位符，不要编造真实DOI或作者。"
+                "如需引用，用[1][2]做占位符，不要编造真实DOI或作者。"
             )
             user_prompt = (
                 f"题目：{title}\n"
                 f"体裁：{genre}\n"
                 f"写作要求：{instructions}\n\n"
                 f"大纲（Markdown）：\n{outline_md}\n\n"
-                "请生成完整文稿（Markdown格式），保持标题层级与大纲一致。"
+                "生成完整文稿（Markdown），保持标题层级与大纲一致。"
             )
             try:
                 out = self.llm.chat([
@@ -335,11 +435,10 @@ class WriterEngine:
                     {"role": "user", "content": user_prompt},
                 ])
                 return clamp_text(out, 45000)
-            except Exception:
-                self.logger(f"[{now_str()}] 回退到离线模板生成正文。")
+            except Exception as e:
+                self.logger(f"[{now_str()}] LLM 调用失败，回退离线模板：{e}")
                 return rule_based_draft(title, genre, outline_md, instructions)
-        else:
-            return rule_based_draft(title, genre, outline_md, instructions)
+        return rule_based_draft(title, genre, outline_md, instructions)
 
 
 # ---------------------------
@@ -375,9 +474,9 @@ def export_docx(path: str, markdown_text: str):
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
-        self.setWindowTitle("设置 - LLM 接口（可选）")
+        self.setWindowTitle("设置 - DeepSeek/OpenAI 兼容接口（可选）")
         self.setModal(True)
-        self.resize(620, 280)
+        self.resize(640, 300)
 
         self.api_base = QtWidgets.QLineEdit()
         self.api_key = QtWidgets.QLineEdit()
@@ -390,9 +489,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.max_tokens.setRange(128, 8000)
 
         form = QtWidgets.QFormLayout()
-        form.addRow("API Base（如 https://api.openai.com ）", self.api_base)
+        form.addRow("API Base（DeepSeek: https://api.deepseek.com）", self.api_base)
         form.addRow("API Key", self.api_key)
-        form.addRow("Model（如 gpt-4o-mini）", self.model)
+        form.addRow("Model（DeepSeek: deepseek-chat / deepseek-reasoner）", self.model)
         form.addRow("Temperature", self.temperature)
         form.addRow("Max tokens", self.max_tokens)
 
@@ -407,24 +506,29 @@ class SettingsDialog(QtWidgets.QDialog):
 
         note = QtWidgets.QLabel(
             "说明：不填写也能使用（将采用离线模板生成）。\n"
-            "若填写，将使用 OpenAI 兼容的 /v1/chat/completions 接口。"
+            "DeepSeek API 与 OpenAI 兼容：base_url 可用 https://api.deepseek.com（或 /v1）。"
         )
         note.setStyleSheet("color:#666;")
         layout.addWidget(note)
         layout.addWidget(btns)
 
         if settings:
-            self.api_base.setText(settings.get("api_base", ""))
+            self.api_base.setText(settings.get("api_base", DEFAULT_API_BASE))
             self.api_key.setText(settings.get("api_key", ""))
-            self.model.setText(settings.get("model", "gpt-4o-mini"))
+            self.model.setText(settings.get("model", DEFAULT_MODEL))
             self.temperature.setValue(float(settings.get("temperature", 0.6)))
             self.max_tokens.setValue(int(settings.get("max_tokens", 1800)))
+        else:
+            self.api_base.setText(DEFAULT_API_BASE)
+            self.model.setText(DEFAULT_MODEL)
+            self.temperature.setValue(0.6)
+            self.max_tokens.setValue(1800)
 
     def get_data(self) -> dict:
         return {
-            "api_base": self.api_base.text().strip(),
+            "api_base": self.api_base.text().strip() or DEFAULT_API_BASE,
             "api_key": self.api_key.text().strip(),
-            "model": self.model.text().strip() or "gpt-4o-mini",
+            "model": self.model.text().strip() or DEFAULT_MODEL,
             "temperature": float(self.temperature.value()),
             "max_tokens": int(self.max_tokens.value()),
         }
@@ -438,9 +542,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.settings = load_settings()
         self.llm_cfg = LLMConfig(
-            api_base=self.settings.get("api_base", ""),
+            api_base=self.settings.get("api_base", DEFAULT_API_BASE),
             api_key=self.settings.get("api_key", ""),
-            model=self.settings.get("model", "gpt-4o-mini"),
+            model=self.settings.get("model", DEFAULT_MODEL),
             temperature=float(self.settings.get("temperature", 0.6)),
             max_tokens=int(self.settings.get("max_tokens", 1800)),
         )
@@ -456,7 +560,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.instruction_edit = QtWidgets.QPlainTextEdit()
         self.instruction_edit.setPlaceholderText(
-            "输入明确指令（可选）。例如：结构=IMRaD; 语言=中文; 字数=2000; 风格=严谨; 期刊=XXX\n"
+            "输入明确指令（可选）。例如：结构=IMRaD; 语言=中文; 字数=2000; 风格=严谨\n"
             "也可以写自然语言要求。"
         )
 
@@ -466,12 +570,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.draft_edit = QtWidgets.QPlainTextEdit()
         self.draft_edit.setPlaceholderText("点击“撰写全文”后，这里显示完整文稿（Markdown）。")
 
-        # Buttons
         self.btn_outline = QtWidgets.QPushButton("① 生成大纲")
         self.btn_write = QtWidgets.QPushButton("② 撰写全文")
         self.btn_export_md = QtWidgets.QPushButton("导出 .md")
         self.btn_export_docx = QtWidgets.QPushButton("导出 .docx")
-        self.btn_settings = QtWidgets.QPushButton("设置（LLM 可选）")
+        self.btn_settings = QtWidgets.QPushButton("设置（API 可选）")
         self.btn_clear = QtWidgets.QPushButton("清空")
 
         self.btn_outline.clicked.connect(self.on_generate_outline)
@@ -481,7 +584,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_settings.clicked.connect(self.on_settings)
         self.btn_clear.clicked.connect(self.on_clear)
 
-        # Layout
         top_bar = QtWidgets.QHBoxLayout()
         top_bar.addWidget(QtWidgets.QLabel("题目："))
         top_bar.addWidget(self.title_edit, 1)
@@ -519,14 +621,14 @@ class MainWindow(QtWidgets.QMainWindow):
         central_layout = QtWidgets.QVBoxLayout(central)
         central_layout.addLayout(top_bar)
         central_layout.addWidget(splitter, 1)
-
         self.setCentralWidget(central)
 
         self.apply_style()
-        self.logger(f"[{now_str()}] 启动完成。未配置 LLM 也可使用离线模板。")
+        self.logger(f"[{now_str()}] 启动完成。未配置 API 也可使用离线模板。")
+        if sys.platform.startswith("linux"):
+            self.logger(f"[{now_str()}] QT_IM_MODULE={os.environ.get('QT_IM_MODULE','(unset)')}")
 
     def apply_style(self):
-        # 简单的现代化暗灰风格（可自行再精调）
         self.setStyleSheet("""
             QMainWindow { background: #f6f7fb; }
             QLabel { color: #222; font-weight: 600; }
@@ -645,7 +747,8 @@ class MainWindow(QtWidgets.QMainWindow):
             data = dlg.get_data()
             self.llm_cfg = LLMConfig(**data)
             save_settings(data)
-            self.logger(f"[{now_str()}] 设置已保存。LLM {'已启用' if OpenAICompatClient(self.llm_cfg, self.logger).is_ready() else '未启用（将使用离线模板）'}。")
+            ready = OpenAICompatClient(self.llm_cfg, self.logger).is_ready()
+            self.logger(f"[{now_str()}] 设置已保存。API {'已启用' if ready else '未启用（将使用离线模板）'}。")
 
     def on_clear(self):
         self.title_edit.clear()
@@ -656,7 +759,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 # ---------------------------
-# CLI (optional)
+# CLI (optional) + self-test
 # ---------------------------
 def run_cli_if_requested():
     import argparse
@@ -665,20 +768,25 @@ def run_cli_if_requested():
     parser.add_argument("--genre", type=str, default="论文", choices=GENRES)
     parser.add_argument("--instructions", type=str, default="")
     parser.add_argument("--outline-only", action="store_true")
+    parser.add_argument("--selftest", action="store_true", help="Run a minimal startup test and exit.")
     args, _ = parser.parse_known_args()
 
+    if args.selftest:
+        # Minimal headless test used in CI (Linux offscreen)
+        print("SELFTEST_OK")
+        sys.exit(0)
+
     if args.title:
-        # CLI 输出到 stdout
         settings = load_settings()
         cfg = LLMConfig(
-            api_base=settings.get("api_base", ""),
+            api_base=settings.get("api_base", DEFAULT_API_BASE),
             api_key=settings.get("api_key", ""),
-            model=settings.get("model", "gpt-4o-mini"),
+            model=settings.get("model", DEFAULT_MODEL),
             temperature=float(settings.get("temperature", 0.6)),
             max_tokens=int(settings.get("max_tokens", 1800)),
         )
 
-        def _log(msg):  # CLI 简化日志
+        def _log(msg):
             print(msg, file=sys.stderr)
 
         client = OpenAICompatClient(cfg, _log)
@@ -695,10 +803,11 @@ def run_cli_if_requested():
 def main():
     run_cli_if_requested()
 
+    # Must be before QApplication
+    linux_preflight_check()
+    qt_env_fixups()
+
     app = QtWidgets.QApplication(sys.argv)
-    # 高DPI适配
-    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
-    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 
     w = MainWindow()
     w.show()
