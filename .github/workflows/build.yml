@@ -29,15 +29,53 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
 
-    - name: Build with PyInstaller
+    # Windows 构建：显式添加新库的收集指令
+    - name: Build Windows
+      if: runner.os == 'Windows'
       shell: bash
       run: |
         pyinstaller --name="PaperAI" --onefile --windowed --clean \
         --collect-all customtkinter \
         --collect-all docx \
         --collect-all openai \
+        --collect-all pypdf \
+        --collect-all openpyxl \
         --hidden-import=docx \
         --hidden-import=openai \
+        --hidden-import=pypdf \
+        --hidden-import=openpyxl \
+        main.py
+
+    # Linux 构建：显式添加新库的收集指令
+    - name: Build Linux
+      if: runner.os == 'Linux'
+      run: |
+        pyinstaller --name="PaperAI" --onefile --clean \
+        --collect-all customtkinter \
+        --collect-all docx \
+        --collect-all openai \
+        --collect-all pypdf \
+        --collect-all openpyxl \
+        --hidden-import=docx \
+        --hidden-import=openai \
+        --hidden-import=pypdf \
+        --hidden-import=openpyxl \
+        main.py
+
+    # macOS 构建
+    - name: Build macOS
+      if: runner.os == 'macOS'
+      run: |
+        pyinstaller --name="PaperAI" --onefile --windowed --clean \
+        --collect-all customtkinter \
+        --collect-all docx \
+        --collect-all openai \
+        --collect-all pypdf \
+        --collect-all openpyxl \
+        --hidden-import=docx \
+        --hidden-import=openai \
+        --hidden-import=pypdf \
+        --hidden-import=openpyxl \
         main.py
 
     - name: Rename Output
