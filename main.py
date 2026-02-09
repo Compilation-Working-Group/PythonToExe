@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v15.0.0 (Anti-Hollow Content)"
+APP_VERSION = "v17.0.0 (Detailed Outline + Smart Expand)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 # ----------------
@@ -20,69 +20,50 @@ DEV_ORG = "俞晋全高中化学名师工作室"
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# === 动态预设库 (深度优化 Prompt) ===
+# === 动态预设库 ===
 PRESET_CONFIGS = {
     "期刊论文 (标准学术)": {
         "topic": "高中化学虚拟仿真实验教学的价值与策略研究",
-        "instruction": "要求：\n1. 结构：摘要、引言、理论价值、教学策略、结语、参考文献。\n2. 【拒绝空洞】：策略部分必须结合具体的《氯气》实验案例，写出具体步骤。\n3. 【拒绝复述】：不要反复强调“本文旨在...”，直接写干货。",
-        "words": "4000",
-        "needs_refs": True 
+        "instruction": "要求：\n1. 语气严谨学术，多用数据。\n2. 策略部分必须结合具体的《氯气》实验案例。\n3. 摘要要连贯。",
+        "words": "4500",
+        "structure_hint": "包含：摘要、关键词、一、引言；二、理论价值；三、教学策略；四、成效反思；参考文献。"
     },
     "教学反思 (深度实战)": {
         "topic": "高三化学二轮复习课后的深刻反思",
-        "instruction": "要求：\n1. 第一人称‘我’。\n2. 【拒绝套话】：不要写“为了提高学生能力”这种废话。直接写“哪道题学生做错了”、“哪个环节冷场了”。\n3. 结构：现象描述 -> 原因剖析 -> 改进清单。",
-        "words": "1500",
-        "needs_refs": False
+        "instruction": "要求：\n1. 第一人称‘我’。\n2. 拒绝套话，分析真实问题。\n3. 结构：现象->原因->措施。",
+        "words": "2000",
+        "structure_hint": "包含：一、背景；二、现象；三、原因；四、改进。"
     },
     "教学案例 (叙事风格)": {
         "topic": "《钠与水反应》教学案例分析",
-        "instruction": "要求：\n1. 像写小说一样描述课堂：要有对话“老师，为什么...”，要有动作“小明猛地站起来”。\n2. 不要堆砌理论，要还原现场。",
+        "instruction": "要求：\n1. 像写故事一样描述课堂冲突。\n2. 还原现场细节。",
         "words": "2500",
-        "needs_refs": False
+        "structure_hint": "包含：一、背景；二、片段描述；三、分析；四、反思。"
     },
     "工作计划 (务实版)": {
         "topic": "2026年春季学期高二化学备课组工作计划",
-        "instruction": "要求：\n1. 多用数据：每周几次教研？备课组几个人？目标分是多少？\n2. 多列清单：具体到月份的安排表。",
+        "instruction": "要求：\n1. 条理清晰，多用数据。\n2. 具体到月份。",
         "words": "2000",
-        "needs_refs": False
+        "structure_hint": "包含：一、指导思想；二、目标；三、措施；四、行事历。"
     },
     "工作总结 (数据版)": {
         "topic": "2025年度个人教学工作总结",
-        "instruction": "要求：\n1. 用数据说话：平均分提升了多少？发表了几篇文章？\n2. 举具体例子：辅导了哪个临界生？",
+        "instruction": "要求：\n1. 用数据说话。\n2. 举具体例子。",
         "words": "3000",
-        "needs_refs": False
+        "structure_hint": "包含：一、概况；二、成绩；三、不足；四、规划。"
     },
     "自由定制 / 其它文稿": {
-        "topic": "（在此输入任何文稿的主题）",
-        "instruction": "请详细描述要求。越具体越好。",
-        "words": "1000",
-        "is_custom": True 
+        "topic": "（在此输入文稿主题）",
+        "instruction": "请详细描述要求。",
+        "words": "1500",
+        "structure_hint": "请自动规划合理的结构。"
     }
-}
-
-# === 结构模板 (针对“空洞”问题的优化) ===
-TEMPLATE_CONFIG = {
-    "期刊论文 (标准学术)": [
-        {"title": "摘要与关键词", "prompt": "写摘要和关键词。摘要要直接说：用了什么方法，得出了什么具体结论。不要写“本文对...进行了探讨”这种废话。"},
-        {"title": "一、问题的提出", "prompt": "写引言。不要写宏大的教育背景。直接描述你在教学中遇到的具体困难（例如：学生对微观概念理解困难，实验有危险）。用一个具体的教学场景开头。"},
-        {"title": "二、核心概念与价值", "prompt": "写理论价值。结合具体的化学知识点（如氧化还原反应）。不要空谈理论，要说清楚这个理论解决哪个具体化学问题。"},
-        {"title": "三、教学策略与实践", "prompt": "【重点章节】请详细描述 2-3 个具体的教学策略。必须结合具体的实验案例（如氯气制备）。写出：教师做了什么？学生做了什么？效果如何？细节越丰富越好。"},
-        {"title": "四、成效与反思", "prompt": "写成效和反思。成效要具体（如：及格率提升了5%）。反思要诚恳（如：设备偶尔卡顿）。"},
-        {"title": "参考文献", "prompt": "列出5-8条参考文献。"}
-    ],
-    "教学反思 (深度实战)": [
-        {"title": "一、教学背景与初衷", "prompt": "简述这节课的课题和初衷。不要啰嗦。直接说：我本来想解决什么问题。"},
-        {"title": "二、课堂“意外”与问题", "prompt": "【核心】描述课堂上发生的真实问题。例如：某个提问全班沉默；某个实验现象不明显。请还原当时的场景和对话。"},
-        {"title": "三、原因的深度剖析", "prompt": "分析上述问题的原因。不要怪学生基础差。多找自己的原因（如：备课不充分、预设太理想化）。"},
-        {"title": "四、具体的改进措施", "prompt": "列出 3 条具体的改进措施。例如：下次我要准备...材料；我要把这个提问改成..."}
-    ],
-    # 其他文体依然沿用之前的逻辑，但在 System Prompt 中加强了“去空洞化”指令
 }
 
 class InteractiveWriterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"全能写作助手 (深度实战版) - {DEV_NAME}")
+        self.title(f"全能写作助手 (详细大纲版) - {DEV_NAME}")
         self.geometry("1200x900")
         
         self.grid_columnconfigure(0, weight=1)
@@ -118,32 +99,27 @@ class InteractiveWriterApp(ctk.CTk):
         t.grid_columnconfigure(1, weight=1)
         t.grid_rowconfigure(5, weight=1) 
 
-        # 1. 文体选择
         ctk.CTkLabel(t, text="选择文体:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=0, column=0, padx=10, pady=10, sticky="e")
         modes = list(PRESET_CONFIGS.keys())
         self.combo_mode = ctk.CTkComboBox(t, values=modes, width=250, command=self.on_mode_change)
         self.combo_mode.set("期刊论文 (标准学术)")
         self.combo_mode.grid(row=0, column=1, padx=10, pady=10, sticky="w")
         
-        # 2. 标题
         ctk.CTkLabel(t, text="标题/主题:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=1, column=0, padx=10, pady=5, sticky="e")
         self.entry_topic = ctk.CTkEntry(t, width=500)
         self.entry_topic.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-        # 3. 具体指令
         ctk.CTkLabel(t, text="指令要求:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=2, column=0, padx=10, pady=5, sticky="ne")
         self.txt_instructions = ctk.CTkTextbox(t, height=60, font=("Microsoft YaHei UI", 12))
         self.txt_instructions.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
-        # 4. 字数
         ctk.CTkLabel(t, text="目标字数:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=3, column=0, padx=10, pady=5, sticky="e")
         self.entry_words = ctk.CTkEntry(t, width=150)
         self.entry_words.grid(row=3, column=1, padx=10, pady=5, sticky="w")
 
-        # 分割线
         ctk.CTkFrame(t, height=2, fg_color="gray").grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
 
-        # 5. 双面板布局
+        # 双面板布局
         self.paned_frame = ctk.CTkFrame(t, fg_color="transparent")
         self.paned_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=5)
         
@@ -151,18 +127,18 @@ class InteractiveWriterApp(ctk.CTk):
         self.paned_frame.grid_columnconfigure(1, weight=2) 
         self.paned_frame.grid_rowconfigure(1, weight=1)
 
-        # 左侧：大纲区
-        ctk.CTkLabel(self.paned_frame, text="第一步：生成大纲 (可修改)", text_color="#1F6AA5", font=("bold", 12)).grid(row=0, column=0, sticky="w", padx=5)
+        # 左侧：大纲
+        ctk.CTkLabel(self.paned_frame, text="第一步：生成详细大纲", text_color="#1F6AA5", font=("bold", 12)).grid(row=0, column=0, sticky="w", padx=5)
         self.txt_outline = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 13)) 
         self.txt_outline.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         
         btn_outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         btn_outline_frame.grid(row=2, column=0, sticky="ew")
-        self.btn_gen_outline = ctk.CTkButton(btn_outline_frame, text="1. 生成/重置大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
+        self.btn_gen_outline = ctk.CTkButton(btn_outline_frame, text="1. 生成详细大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
         self.btn_gen_outline.pack(side="left", padx=5, pady=5)
         ctk.CTkButton(btn_outline_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
 
-        # 右侧：正文区
+        # 右侧：正文
         ctk.CTkLabel(self.paned_frame, text="第二步：按大纲撰写全文", text_color="#2CC985", font=("bold", 12)).grid(row=0, column=1, sticky="w", padx=5)
         self.txt_content = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 14))
         self.txt_content.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
@@ -202,7 +178,6 @@ class InteractiveWriterApp(ctk.CTk):
         ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
 
     # --- 交互逻辑 ---
-
     def on_mode_change(self, choice):
         preset = PRESET_CONFIGS.get(choice, PRESET_CONFIGS["期刊论文 (标准学术)"])
         self.entry_topic.delete(0, "end")
@@ -215,12 +190,12 @@ class InteractiveWriterApp(ctk.CTk):
     def clear_all(self):
         self.txt_outline.delete("0.0", "end")
         self.txt_content.delete("0.0", "end")
-        self.status_label.configure(text="已清空所有内容", text_color="gray")
+        self.status_label.configure(text="已清空", text_color="gray")
         self.progressbar.set(0)
 
     def stop_writing(self):
         self.stop_event.set()
-        self.status_label.configure(text="已发送停止指令...", text_color="red")
+        self.status_label.configure(text="已停止", text_color="red")
 
     def get_client(self):
         key = self.api_config.get("api_key")
@@ -230,7 +205,7 @@ class InteractiveWriterApp(ctk.CTk):
             return None
         return OpenAI(api_key=key, base_url=base)
 
-    # --- 任务：生成大纲 (智能结构) ---
+    # --- 任务：生成详细大纲 (核心修复) ---
     def run_gen_outline(self):
         self.stop_event.clear()
         topic = self.entry_topic.get().strip()
@@ -248,36 +223,31 @@ class InteractiveWriterApp(ctk.CTk):
         if not client: return
 
         self.btn_gen_outline.configure(state="disabled", text="规划中...")
-        self.status_label.configure(text=f"正在规划【{mode}】结构...", text_color="#1F6AA5")
+        self.status_label.configure(text=f"正在规划【{mode}】的详细结构...", text_color="#1F6AA5")
         
-        # 1. 优先使用预设的强制模板
-        template = TEMPLATE_CONFIG.get(mode)
-        
-        if template:
-            # 如果有强制模板，直接从模板中提取标题
-            self.txt_outline.delete("0.0", "end")
-            for section in template:
-                self.txt_outline.insert("end", section["title"] + "\n")
-            self.status_label.configure(text="大纲已加载（基于标准模板），您可以手动修改。", text_color="green")
-            self.btn_gen_outline.configure(state="normal", text="1. 生成/重置大纲")
-            return
+        # 获取结构建议
+        preset = PRESET_CONFIGS.get(mode, {})
+        hint = preset.get("structure_hint", "")
 
-        # 2. 如果没有预设模板（比如自由定制），则调用 AI 生成
+        # 核心提示词：强制要求二级标题
         prompt = f"""
-        任务：为《{topic}》写一份【{mode}】的大纲。
-        用户的特殊指令：{instr}
+        任务：为《{topic}》写一份【{mode}】的**详细大纲**。
+        用户的指令：{instr}
+        结构参考：{hint}
         
-        要求：
-        1. 请列出文章的章节标题（每行一个）。
-        2. 不要包含任何 Markdown 符号（如 # 或 *）。
-        3. 只要标题，不要任何解释性文字。
+        【强制要求】：
+        1. 必须包含一级标题（如“一、引言”）和 **二级标题**（如“（一）研究背景”）。
+        2. 每一章下面至少要有 2-3 个小标题，让大纲看起来非常丰满。
+        3. 如果是期刊论文，必须包含：摘要、关键词、参考文献。
+        4. 直接输出大纲内容，不要 Markdown，不要多余解释。
         """
         
         try:
             resp = client.chat.completions.create(
                 model=self.api_config.get("model"),
                 messages=[{"role": "user", "content": prompt}],
-                stream=True
+                stream=True,
+                temperature=0.8
             )
             
             self.txt_outline.delete("0.0", "end")
@@ -288,20 +258,20 @@ class InteractiveWriterApp(ctk.CTk):
                     self.txt_outline.insert("end", c)
                     self.txt_outline.see("end")
             
-            self.status_label.configure(text="大纲已生成！请手动修改后点击'撰写全文'。", text_color="green")
+            self.status_label.configure(text="详细大纲已生成！请确认满意后点击'撰写全文'。", text_color="green")
 
         except Exception as e:
             self.status_label.configure(text=f"API 错误: {str(e)}", text_color="red")
         finally:
-            self.btn_gen_outline.configure(state="normal", text="1. 生成/重置大纲")
+            self.btn_gen_outline.configure(state="normal", text="1. 生成详细大纲")
 
-    # --- 任务：撰写全文 (去空洞化逻辑) ---
+    # --- 任务：撰写全文 (逐条目撰写) ---
     def run_full_write(self):
         self.stop_event.clear()
         
         outline_raw = self.txt_outline.get("0.0", "end").strip()
-        if len(outline_raw) < 2:
-            self.status_label.configure(text="大纲为空！请先生成。", text_color="red")
+        if len(outline_raw) < 5:
+            self.status_label.configure(text="大纲为空！", text_color="red")
             return
             
         sections = [line.strip() for line in outline_raw.split('\n') if line.strip()]
@@ -323,78 +293,74 @@ class InteractiveWriterApp(ctk.CTk):
         self.txt_content.delete("0.0", "end")
         self.progressbar.set(0)
         
+        # 智能分配字数：条目越多，单条字数越少，但总数达标
         avg_words = int(total_words / len(sections))
-        total_steps = len(sections)
+        if avg_words < 200: avg_words = 200 # 保证每个小节至少写点东西
         
-        # 获取模板的 Prompt 映射（如果有）
-        template = TEMPLATE_CONFIG.get(mode, [])
-        # 构建一个 {标题: Prompt} 的字典，方便查找
-        prompt_map = {item["title"]: item["prompt"] for item in template}
+        total_steps = len(sections)
 
         try:
             for i, section_title in enumerate(sections):
-                if self.stop_event.is_set():
-                    self.status_label.configure(text="已停止。", text_color="red")
-                    break
+                if self.stop_event.is_set(): break
 
                 self.status_label.configure(text=f"正在撰写 ({i+1}/{total_steps}): {section_title}...", text_color="#1F6AA5")
                 self.progressbar.set(i / total_steps)
 
-                # 插入标题标记
-                self.txt_content.insert("end", f"\n\n【{section_title}】\n")
+                # 插入标题 (区分一级和二级标题的格式)
+                # 简单判断：如果是一、二、三，则空两行；如果是（一）、（二），则空一行
+                if any(x in section_title for x in ['一、', '二、', '三、', '四、', '五、', '六、', '参考文献']):
+                     self.txt_content.insert("end", f"\n\n【{section_title}】\n")
+                else:
+                     self.txt_content.insert("end", f"\n【{section_title}】\n")
+                     
                 self.txt_content.see("end")
 
-                # --- 智能 Prompt 构建 ---
-                # 1. 尝试从模板中找特定的 Prompt
-                specific_prompt = prompt_map.get(section_title, f"请撰写{section_title}的内容。")
-                
-                # 2. 构建去空洞化的 System Prompt
+                # 特殊处理：摘要
+                is_abstract = "摘要" in section_title
+                prompt_extra = "请撰写连贯的短文，严禁列条目。" if is_abstract else "内容要务实，结合具体案例。"
+
                 system_prompt = f"""
-                你是一位务实的高中化学教师。
-                当前任务：撰写文章的【{section_title}】部分。
+                你是一位专业的高中化学教师文秘。
+                当前任务：撰写【{section_title}】的内容。
                 文体类型：{mode}
                 
-                【去空洞化指令 - 必须执行】：
-                1. 严禁复述标题。不要写“关于本章节...”、“我的初衷是...”，直接写实质内容。
-                2. 严禁车轱辘话。不要反复说“提高能力”、“构建网络”，请换成具体的例子。
-                3. 【强制填充】：必须包含事实、数据或案例。
-                   - 如果是反思，必须写具体的失败案例。
-                   - 如果是计划，必须写具体的时间和措施。
-                4. 严格遵守用户指令：{instr}
-                5. 严禁 Markdown 格式。
+                【指令】：
+                1. 严禁复述标题。
+                2. 严禁 Markdown。
+                3. {prompt_extra}
+                4. {instr}
                 """
                 
                 user_prompt = f"""
-                文章标题：{topic}
-                当前章节：{section_title}
-                参考字数：约 {avg_words} 字
-                
-                【本章写作提示】：{specific_prompt}
-                
-                请直接输出正文。
+                标题：{topic}
+                当前小节：{section_title}
+                字数：约 {avg_words} 字
+                请直接写正文。
                 """
 
+                # 使用非流式请求以便清洗
                 resp = client.chat.completions.create(
                     model=self.api_config.get("model"),
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    stream=True,
-                    temperature=0.75 # 稍微降低随机性，保证内容扎实
+                    temperature=0.75
                 )
-
-                for chunk in resp:
-                    if self.stop_event.is_set(): break
-                    if chunk.choices[0].delta.content:
-                        c = chunk.choices[0].delta.content
-                        self.txt_content.insert("end", c)
-                        self.txt_content.see("end")
                 
+                raw = resp.choices[0].message.content
+                
+                # 清洗算法：去除开头的标题重复
+                clean = raw.strip()
+                pattern = r'^\s*(\#+|【|\*\*|)?\s*' + re.escape(section_title) + r'\s*(】|\*\*|)?\s*\n?'
+                clean = re.sub(pattern, '', clean, flags=re.IGNORECASE).strip()
+                
+                self.txt_content.insert("end", clean)
+                self.txt_content.see("end")
                 time.sleep(0.5) 
 
             if not self.stop_event.is_set():
-                self.status_label.configure(text="撰写完成！内容已优化。", text_color="green")
+                self.status_label.configure(text="撰写完成！", text_color="green")
                 self.progressbar.set(1)
 
         except Exception as e:
@@ -430,13 +396,24 @@ class InteractiveWriterApp(ctk.CTk):
 
                 if line.startswith("【") and line.endswith("】"):
                     header = line.replace("【", "").replace("】", "")
-                    p = doc.add_paragraph()
-                    p.paragraph_format.space_before = Pt(12)
-                    run = p.add_run(header)
-                    run.bold = True
-                    run.font.size = Pt(14)
-                    run.font.name = u'黑体'
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
+                    
+                    # 判断一级还是二级标题
+                    if any(x in header for x in ['一、', '二、', '三、', '四、', '五、', '六、', '参考文献', '摘要']):
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_before = Pt(12)
+                        run = p.add_run(header)
+                        run.bold = True
+                        run.font.size = Pt(14) # 一级标题大一点
+                        run.font.name = u'黑体'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
+                    else:
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_before = Pt(6)
+                        run = p.add_run(header)
+                        run.bold = True
+                        run.font.size = Pt(12) # 二级标题小一点
+                        run.font.name = u'楷体' # 二级标题用楷体区分
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'楷体')
                 else:
                     clean_line = re.sub(r'\*\*|##|__|```', '', line)
                     if clean_line.startswith("- ") or clean_line.startswith("* "): clean_line = clean_line[2:]
