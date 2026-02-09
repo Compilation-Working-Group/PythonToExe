@@ -1,731 +1,339 @@
 import customtkinter as ctk
-import threading
-from openai import OpenAI
+import tkinter as tk
+from tkinter import filedialog, messagebox
 import os
-import sys
-from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from tkinter import filedialog, messagebox, simpledialog
 import json
-import time
 import re
-import difflib 
+import threading
+from docx import Document
+from docx.shared import Cm, Pt, RGBColor
+from docx.oxml.ns import qn
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_LINE_SPACING
+from docx.oxml import OxmlElement
 
-# --- 依赖库检测 ---
-try:
-    import pypdf
-except ImportError:
-    pypdf = None
-try:
-    import openpyxl
-except ImportError:
-    openpyxl = None
+# --- 全局配置与默认值 ---
+APP_NAME = "公文自动排版助手"
+APP_VERSION = "v1.0.0"
+AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
-# --- Linux 显示修正 ---
-if sys.platform.startswith('linux'):
-    try:
-        import tkinter
-        root = tkinter.Tk()
-        root.destroy()
-    except:
-        if os.environ.get('DISPLAY','') == '':
-            os.environ.__setitem__('DISPLAY', ':0')
-
-# --- 配置区域 ---
-APP_VERSION = "v33.0.0 (Pro: Help & About Added)"
-DEV_NAME = "俞晋全"
-DEV_ORG = "俞晋全高中化学名师工作室"
-COPYRIGHT = "© 2026 Yu Jinquan Chemistry Studio. All Rights Reserved."
-
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue")
-
-# === 文体风格定义 ===
-STYLE_GUIDE = {
-    "期刊论文": {
-        "desc": "学术严谨，理实结合，适合发表。",
-        "default_topic": "高中化学虚拟仿真实验教学的价值与策略研究",
-        "default_words": "3000",
-        "default_instruction": "要求：\n1. 结合具体的化学教学案例。\n2. 数据详实，逻辑严密。\n3. 适合《化学教育》或《中化参》风格。",
-        "writing_prompt": "语气学术、客观、务实。严禁堆砌空洞理论，必须用具体的化学知识点和教学片段来支撑观点。",
+DEFAULT_CONFIG = {
+    "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
+    "line_spacing": 28,  # 磅值
+    "fonts": {
+        "title": "方正小标宋简体", # 注意：电脑需安装此字体，否则Word会回退
+        "h1": "黑体",
+        "h2": "楷体_GB2312",
+        "h3": "仿宋_GB2312",
+        "body": "仿宋_GB2312"
     },
-    "教学反思": {
-        "desc": "第一人称，深度剖析，真诚走心。",
-        "default_topic": "高三化学二轮复习课后的深刻反思",
-        "default_words": "2000",
-        "default_instruction": "要求：\n1. 必须使用第一人称‘我’。\n2. 重点复盘课堂上的‘遗憾点’和‘生成性问题’。\n3. 剖析原因要深刻。",
-        "writing_prompt": "使用第一人称。文风要诚恳、犀利。多描写课堂上的真实细节（如学生的错题、冷场的瞬间）。",
-    },
-    "教学案例": {
-        "desc": "叙事风格，还原现场，生动具体。",
-        "default_topic": "《钠与水反应》教学案例分析",
-        "default_words": "2500",
-        "default_instruction": "要求：\n1. 采用‘教育叙事’手法。\n2. 还原师生对话，描写实验现象。\n3. 突出‘意外’与‘机智化解’。",
-        "writing_prompt": "采用叙事风格。大量使用对话描写、动作描写。还原真实的课堂冲突和教学灵感。",
-    },
-    "工作计划": {
-        "desc": "行政公文，条理清晰，数据导向。",
-        "default_topic": "2026年春季学期高二化学备课组工作计划",
-        "default_words": "2000",
-        "default_instruction": "要求：\n1. 语言简练，干脆利落。\n2. 包含具体的行事历。\n3. 目标要量化。",
-        "writing_prompt": "行政公文风格。多用‘一要...二要...’句式。内容必须具体可执行，包含时间节点。",
-    },
-    "工作总结": {
-        "desc": "汇报风格，亮点突出，分析透彻。",
-        "default_topic": "2025年度个人教学工作总结",
-        "default_words": "3000",
-        "default_instruction": "要求：\n1. 用数据说话。\n2. 既要展示成绩，也要诚恳分析不足。\n3. 结构严谨。",
-        "writing_prompt": "汇报风格。多用数据对比。对成绩要总结经验，对不足要分析原因并提出对策。",
-    },
-    "自由定制": {
-        "desc": "完全根据指令生成。",
-        "default_topic": "（在此输入题目）",
-        "default_words": "1000",
-        "default_instruction": "请详细描述您的要求...",
-        "writing_prompt": "严格遵循用户的特殊指令，风格不限。",
+    "sizes": {
+        "title": 22, # 二号
+        "h1": 16,    # 三号
+        "h2": 16,
+        "h3": 16,
+        "body": 16
     }
 }
 
-class MasterWriterApp(ctk.CTk):
+class GongWenFormatterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"全能写作系统 - {APP_VERSION}")
-        self.geometry("1300x900")
-        
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.title(f"{APP_NAME} {APP_VERSION}")
+        self.geometry("900x700")
+        ctk.set_appearance_mode("System")
+        ctk.set_default_color_theme("blue")
 
-        self.api_config = {
-            "api_key": "",
-            "base_url": "https://api.deepseek.com", 
-            "model": "deepseek-chat"
-        }
-        self.load_config()
-        self.stop_event = threading.Event()
-        self.reference_content = "" 
+        self.config = self.load_config()
+        self.file_list = []
 
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-        
-        self.tab_write = self.tabview.add("写作工作台")
-        self.tab_settings = self.tabview.add("系统设置")
-        self.tab_about = self.tabview.add("帮助与关于") # 新增页面
-
-        self.setup_write_tab()
-        self.setup_settings_tab()
-        self.setup_about_tab() # 加载关于页面
-
-    # --- 新增：帮助与关于页面 ---
-    def setup_about_tab(self):
-        t = self.tab_about
-        t.grid_columnconfigure(0, weight=1)
-        
-        # 开发者信息区
-        dev_frame = ctk.CTkFrame(t, fg_color="transparent")
-        dev_frame.pack(pady=20, fill="x", padx=20)
-        
-        ctk.CTkLabel(dev_frame, text=APP_VERSION, font=("Arial", 20, "bold"), text_color="#1F6AA5").pack()
-        ctk.CTkLabel(dev_frame, text=f"开发者: {DEV_NAME}", font=("Microsoft YaHei UI", 16, "bold")).pack(pady=(10, 0))
-        ctk.CTkLabel(dev_frame, text=DEV_ORG, font=("Microsoft YaHei UI", 14)).pack()
-        ctk.CTkLabel(dev_frame, text=COPYRIGHT, font=("Arial", 10), text_color="gray").pack(pady=5)
-        
-        ctk.CTkFrame(t, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10)
-
-        # 使用说明书
-        guide_text = """【软件使用说明书】
-
-一、 系统配置（首次使用必做）
-1. 点击“系统设置”选项卡。
-2. 输入您的 API Key、Base URL 和 模型名称（推荐 deepseek-chat）。
-3. 点击“保存配置”，系统会自动记住您的设置。
-
-二、 写作流程
-第1步：选择文体与资料
-   - 在顶部下拉框选择文体（如“期刊论文”）。系统会自动填入推荐的标题和指令。
-   - 【核心功能】点击“📂 上传/筛选资料”按钮，投喂参考文档。
-     * 支持 Word(.docx)、PDF、Excel(.xlsx)、文本(.txt)等。
-     * 上传 Excel 时，系统会弹窗询问是否筛选特定关键词（如“高二1班”），以此过滤无关数据，提高分析精准度。
-
-第2步：生成大纲
-   - 确认标题和指令无误后，点击左下角的“生成/重置大纲”。
-   - AI 会阅读您的题目和参考资料，设计出量身定制的结构。
-   - 您可以在左侧文本框中手动修改大纲（例如增删章节）。
-
-第3步：撰写全文
-   - 点击“开始撰写全文”。
-   - 右侧窗口会实时显示 AI 的撰写过程。
-   - 系统内置了“智能去重”和“防复读”机制，确保文章流畅自然。
-
-第4步：导出成果
-   - 撰写完成后，点击右下角的“导出 Word”。
-   - 系统会自动清洗 Markdown 符号（如 **加粗**），生成纯净的 Word 文档。
-
-三、 常见问题
-   - 如果 AI 写偏了：请检查“具体指令”是否清晰，或者点击“❌ 清除”参考资料后重试。
-   - 如果上传 Excel 报错：请确保 Excel 没有加密，且格式标准。
-   - 导出 Word 乱码：通常不会发生，系统已内置 UTF-8 编码处理。
-
-祝您写作愉快！
-"""
-        txt_guide = ctk.CTkTextbox(t, font=("Microsoft YaHei UI", 13), height=400)
-        txt_guide.pack(fill="both", expand=True, padx=20, pady=10)
-        txt_guide.insert("0.0", guide_text)
-        txt_guide.configure(state="disabled") # 只读模式
-
-    def setup_write_tab(self):
-        t = self.tab_write
-        t.grid_columnconfigure(1, weight=1)
-        t.grid_rowconfigure(6, weight=1) 
-
-        ctrl_frame = ctk.CTkFrame(t, fg_color="transparent")
-        ctrl_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-        
-        ctk.CTkLabel(ctrl_frame, text="文体类型:", font=("bold", 14)).pack(side="left", padx=5)
-        self.combo_mode = ctk.CTkComboBox(ctrl_frame, values=list(STYLE_GUIDE.keys()), width=180, command=self.on_mode_change)
-        self.combo_mode.set("期刊论文")
-        self.combo_mode.pack(side="left", padx=5)
-        
-        ctk.CTkLabel(ctrl_frame, text="目标字数:", font=("bold", 14)).pack(side="left", padx=(20, 5))
-        self.entry_words = ctk.CTkEntry(ctrl_frame, width=100)
-        self.entry_words.insert(0, "3000")
-        self.entry_words.pack(side="left", padx=5)
-
-        ctk.CTkLabel(t, text="文章标题:", font=("bold", 12)).grid(row=1, column=0, padx=10, sticky="e")
-        self.entry_topic = ctk.CTkEntry(t, width=600)
-        self.entry_topic.grid(row=1, column=1, padx=10, pady=5, sticky="w")
-
-        # --- 参考文档区 ---
-        ctk.CTkLabel(t, text="参考资料:", font=("bold", 12)).grid(row=2, column=0, padx=10, sticky="e")
-        ref_frame = ctk.CTkFrame(t, fg_color="transparent")
-        ref_frame.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-        
-        self.btn_upload = ctk.CTkButton(ref_frame, text="📂 上传/筛选资料", command=self.load_reference_file, width=140, fg_color="#E67E22")
-        self.btn_upload.pack(side="left", padx=5)
-        
-        self.btn_clear_ref = ctk.CTkButton(ref_frame, text="❌ 清除", command=self.clear_reference_file, width=60, fg_color="#C0392B")
-        self.btn_clear_ref.pack(side="left", padx=5)
-        
-        self.lbl_ref_status = ctk.CTkLabel(ref_frame, text="未上传 (AI将基于通用知识写作)", text_color="gray")
-        self.lbl_ref_status.pack(side="left", padx=10)
-
-        ctk.CTkLabel(t, text="具体指令:", font=("bold", 12)).grid(row=3, column=0, padx=10, sticky="ne")
-        self.txt_instructions = ctk.CTkTextbox(t, height=50, font=("Arial", 12))
-        self.txt_instructions.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
-
-        ctk.CTkFrame(t, height=2, fg_color="gray").grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
-
-        # 双面板
-        self.paned_frame = ctk.CTkFrame(t, fg_color="transparent")
-        self.paned_frame.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=5)
-        self.paned_frame.grid_columnconfigure(0, weight=1) 
-        self.paned_frame.grid_columnconfigure(1, weight=2) 
-        self.paned_frame.grid_rowconfigure(1, weight=1)
-
-        # 左侧大纲
-        outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        outline_frame.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(outline_frame, text="Step 1: 智能大纲 (AI根据题目生成)", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
-        
-        self.txt_outline = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 12)) 
-        self.txt_outline.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        
-        btn_o_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        btn_o_frame.grid(row=2, column=0, sticky="ew")
-        self.btn_gen_outline = ctk.CTkButton(btn_o_frame, text="生成/重置大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
-        self.btn_gen_outline.pack(side="left", padx=5)
-        ctk.CTkButton(btn_o_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
-
-        # 右侧正文
-        content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        content_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (自动清洗)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
-        self.status_label = ctk.CTkLabel(content_frame, text="就绪", text_color="gray")
-        self.status_label.pack(side="right")
-
-        self.txt_content = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 14))
-        self.txt_content.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
-        
-        btn_w_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
-        btn_w_frame.grid(row=2, column=1, sticky="ew")
-        self.btn_run_write = ctk.CTkButton(btn_w_frame, text="开始撰写全文", command=self.run_full_write, fg_color="#2CC985", font=("bold", 14))
-        self.btn_run_write.pack(side="left", padx=5)
-        self.btn_stop = ctk.CTkButton(btn_w_frame, text="🔴 停止", command=self.stop_writing, fg_color="#C0392B", width=80)
-        self.btn_stop.pack(side="left", padx=5)
-        self.btn_clear_all = ctk.CTkButton(btn_w_frame, text="🧹 清空", command=self.clear_all, fg_color="gray", width=80)
-        self.btn_clear_all.pack(side="right", padx=5)
-        self.btn_export = ctk.CTkButton(btn_w_frame, text="导出 Word", command=self.save_to_word, width=120)
-        self.btn_export.pack(side="right", padx=5)
-
-        self.progressbar = ctk.CTkProgressBar(t, mode="determinate", height=2)
-        self.progressbar.grid(row=7, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-        self.progressbar.set(0)
-
-        self.on_mode_change("期刊论文")
-
-    def setup_settings_tab(self):
-        t = self.tab_settings
-        ctk.CTkLabel(t, text="API Key:").pack(pady=(20, 5))
-        self.entry_key = ctk.CTkEntry(t, width=400, show="*")
-        self.entry_key.insert(0, self.api_config.get("api_key", ""))
-        self.entry_key.pack(pady=5)
-        ctk.CTkLabel(t, text="Base URL:").pack(pady=5)
-        self.entry_url = ctk.CTkEntry(t, width=400)
-        self.entry_url.insert(0, self.api_config.get("base_url", ""))
-        self.entry_url.pack(pady=5)
-        ctk.CTkLabel(t, text="Model:").pack(pady=5)
-        self.entry_model = ctk.CTkEntry(t, width=400)
-        self.entry_model.insert(0, self.api_config.get("model", ""))
-        self.entry_model.pack(pady=5)
-        ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
-
-    # --- 核心升级：Excel 筛选与多格式读取 ---
-    def load_reference_file(self):
-        filetypes = [
-            ("All Supported", "*.docx *.pdf *.xlsx *.txt *.md *.csv *.py *.json"),
-            ("Excel Data", "*.xlsx *.xls"),
-            ("Word", "*.docx"),
-            ("PDF", "*.pdf"),
-            ("Text", "*.txt *.md")
-        ]
-        filepath = filedialog.askopenfilename(filetypes=filetypes)
-        if not filepath: return
-        
-        filename = os.path.basename(filepath)
-        ext = os.path.splitext(filepath)[1].lower()
-        content = ""
-        filter_key = ""
-        
-        try:
-            # 1. Excel (.xlsx) - 支持班级/关键词筛选
-            if ext in [".xlsx", ".xls"]:
-                if openpyxl is None: raise ImportError("缺少 openpyxl")
-                
-                # 弹出对话框，询问筛选关键词
-                dialog = ctk.CTkInputDialog(text="【Excel数据预筛选】\n请输入要提取的关键词（如 '高二1班'）。\n若需全部分析，请留空直接点击OK。", title="数据筛选")
-                filter_key = dialog.get_input()
-                if filter_key is None: filter_key = "" # Cancel = empty
-                filter_key = filter_key.strip()
-
-                wb = openpyxl.load_workbook(filepath, data_only=True)
-                for sheet in wb:
-                    sheet_data = []
-                    rows = list(sheet.iter_rows(values_only=True))
-                    if not rows: continue
-                    
-                    # 永远保留表头
-                    header = rows[0]
-                    # 转CSV格式
-                    sheet_data.append(",".join([str(c) if c else "" for c in header]))
-                    
-                    match_count = 0
-                    for row in rows[1:]:
-                        row_str = ",".join([str(c) if c else "" for c in row])
-                        # 核心筛选逻辑
-                        if not filter_key or (filter_key in row_str):
-                            sheet_data.append(row_str)
-                            match_count += 1
-                    
-                    if len(sheet_data) > 1: # 有数据（不仅是表头）
-                        content += f"\n--- Sheet: {sheet.title} (匹配到 {match_count} 行) ---\n"
-                        content += "\n".join(sheet_data) + "\n"
-
-            # 2. Word (.docx)
-            elif ext == ".docx":
-                doc = Document(filepath)
-                content = "\n".join([p.text for p in doc.paragraphs])
-            
-            # 3. PDF (.pdf)
-            elif ext == ".pdf":
-                if pypdf is None: raise ImportError("缺少 pypdf")
-                reader = pypdf.PdfReader(filepath)
-                for page in reader.pages: content += page.extract_text() + "\n"
-            
-            # 4. 纯文本
-            else:
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f: content = f.read()
-                except UnicodeDecodeError:
-                    with open(filepath, "r", encoding="gbk") as f: content = f.read()
-
-            content = content.strip()
-            if not content: raise ValueError("文件内容为空或筛选后无数据")
-                
-            self.reference_content = content[:20000] # 放宽到2万字
-            if len(content) > 20000: self.reference_content += "\n...(内容过长，已截取)"
-            
-            status_msg = f"已挂载: {filename}"
-            if filter_key: status_msg += f" (筛选: {filter_key})"
-            
-            self.lbl_ref_status.configure(text=status_msg, text_color="green")
-            self.btn_clear_ref.configure(state="normal")
-            messagebox.showinfo("成功", f"文件解析成功！\nAI将基于此数据进行分析。")
-            
-        except Exception as e:
-            messagebox.showerror("读取失败", f"无法读取: {str(e)}")
-
-    def clear_reference_file(self):
-        self.reference_content = ""
-        self.lbl_ref_status.configure(text="未上传 (AI将基于通用知识写作)", text_color="gray")
-        self.btn_clear_ref.configure(state="disabled")
-        messagebox.showinfo("已清除", "参考资料已清空。")
-
-    def on_mode_change(self, choice):
-        config = STYLE_GUIDE.get(choice, STYLE_GUIDE["自由定制"])
-        self.entry_topic.delete(0, "end")
-        self.entry_topic.insert(0, config.get("default_topic", ""))
-        self.txt_instructions.delete("0.0", "end")
-        self.txt_instructions.insert("0.0", config.get("default_instruction", ""))
-        self.entry_words.delete(0, "end")
-        self.entry_words.insert(0, config.get("default_words", "3000"))
-        
-        self.txt_outline.delete("0.0", "end")
-        self.txt_outline.insert("0.0", f"（已切换至【{choice}】模式，请点击“生成/重置大纲”...）")
-
-    def stop_writing(self):
-        self.stop_event.set()
-        self.status_label.configure(text="已停止", text_color="red")
-
-    def clear_all(self):
-        self.txt_outline.delete("0.0", "end")
-        self.txt_content.delete("0.0", "end")
-        self.progressbar.set(0)
-        self.status_label.configure(text="已清空")
-
-    def get_client(self):
-        key = self.api_config.get("api_key")
-        base = self.api_config.get("base_url")
-        if not key:
-            self.status_label.configure(text="错误：请配置API Key", text_color="red")
-            return None
-        return OpenAI(api_key=key, base_url=base)
-
-    def run_gen_outline(self):
-        self.stop_event.clear()
-        topic = self.entry_topic.get().strip()
-        mode = self.combo_mode.get()
-        instr = self.txt_instructions.get("0.0", "end").strip()
-        if not topic:
-            self.status_label.configure(text="请输入标题！", text_color="red")
-            return
-        threading.Thread(target=self.thread_outline, args=(mode, topic, instr), daemon=True).start()
-
-    def thread_outline(self, mode, topic, instr):
-        client = self.get_client()
-        if not client: return
-        self.btn_gen_outline.configure(state="disabled")
-        self.status_label.configure(text="正在分析题目并构建大纲...", text_color="#1F6AA5")
-        
-        style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
-        ref_hint = ""
-        if self.reference_content:
-            ref_hint = f"【资料背景】：用户提供了数据/资料（{len(self.reference_content)}字），请务必在构建大纲时安排章节来分析这些数据。"
-
-        prompt = f"""
-        任务：为《{topic}》写一份【{mode}】的详细大纲。
-        【参考风格】：{style_cfg['desc']}
-        【用户指令】：{instr}
-        {ref_hint}
-        
-        【要求】：
-        1. 拒绝千篇一律。请根据题目内涵定制结构。
-        2. 必须包含一级标题（如一、二、三）和二级标题（如（一）（二））。
-        3. 不要包含Markdown符号。
-        4. 直接输出大纲。
-        """
-        try:
-            resp = client.chat.completions.create(
-                model=self.api_config.get("model"),
-                messages=[{"role": "user", "content": prompt}],
-                stream=True
-            )
-            self.txt_outline.delete("0.0", "end")
-            for chunk in resp:
-                if self.stop_event.is_set(): break
-                if chunk.choices[0].delta.content:
-                    c = chunk.choices[0].delta.content
-                    self.txt_outline.insert("end", c)
-                    self.txt_outline.see("end")
-            self.status_label.configure(text="大纲已生成，请检查并修改。", text_color="green")
-        except Exception as e:
-            self.status_label.configure(text=f"API错误: {str(e)}", text_color="red")
-        finally:
-            self.btn_gen_outline.configure(state="normal")
-
-    def run_full_write(self):
-        self.stop_event.clear()
-        outline_raw = self.txt_outline.get("0.0", "end").strip()
-        if len(outline_raw) < 5:
-            self.status_label.configure(text="请先生成大纲", text_color="red")
-            return
-            
-        lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
-        if len(lines) > 0:
-            first_line = lines[0]
-            topic = self.entry_topic.get().strip()
-            # 智能滤除第一行如果它像标题
-            if len(topic) > 2 and topic[:4] in first_line:
-                lines = lines[1:]
-
-        tasks = []
-        current_task = []
-        for line in lines:
-            is_header = False
-            # 强化标题识别逻辑
-            if re.match(r'^[一二三四五六七八九十]+、', line): is_header = True
-            if re.match(r'^第[一二三四五六七八九十]+部分', line): is_header = True
-            if "摘要" in line or "参考文献" in line: is_header = True
-            
-            if is_header:
-                if current_task: tasks.append(current_task)
-                current_task = [line]
-            else:
-                current_task.append(line)
-        if current_task: tasks.append(current_task)
-
-        if not tasks:
-            self.status_label.configure(text="大纲格式无法识别", text_color="red")
-            return
-
-        topic = self.entry_topic.get()
-        mode = self.combo_mode.get()
-        instr = self.txt_instructions.get("0.0", "end").strip()
-        try: total_words = int(self.entry_words.get())
-        except: total_words = 3000
-        
-        threading.Thread(target=self.thread_write, args=(tasks, mode, topic, instr, total_words), daemon=True).start()
-
-    def thread_write(self, tasks, mode, topic, instr, total_words):
-        client = self.get_client()
-        if not client: return
-
-        self.btn_run_write.configure(state="disabled")
-        self.txt_content.delete("0.0", "end")
-        self.progressbar.set(0)
-        
-        style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
-        core_tasks = [t for t in tasks if "摘要" not in t[0] and "参考文献" not in t[0]]
-        core_count = len(core_tasks) if len(core_tasks) > 0 else 1
-        
-        reserved_words = 0
-        if any("摘要" in t[0] for t in tasks): reserved_words += 300
-        available_words = total_words - reserved_words
-        if available_words < 500: available_words = 500
-        avg_core_words = available_words // core_count
-
-        last_paragraph = "（文章刚开始，暂无上文）"
-        
-        ref_prompt_block = ""
-        if self.reference_content:
-            ref_prompt_block = f"""
-            【重要参考资料】：
-            以下是用户提供的真实数据或资料。请务必：
-            1. 分析这些数据。
-            2. 在正文中引用数据作为论据。
-            3. 保持数据真实性，不要编造。
-            
-            {self.reference_content}
-            ------------------------------------------------
-            """
-
-        def get_core_text(t):
-            # 提取汉字，用于比对
-            return re.sub(r'[^\u4e00-\u9fa50-9]', '', t)
-
-        try:
-            for i, task_lines in enumerate(tasks):
-                if self.stop_event.is_set(): break
-                
-                header = task_lines[0]
-                sub_points = "\n".join(task_lines[1:])
-                current_limit = avg_core_words
-                prompt_suffix = ""
-                
-                if "摘要" in header: 
-                    current_limit = 300
-                    prompt_suffix = "【特殊要求】：必须在摘要下方另起一行，列出3-5个【关键词】。"
-                elif "参考文献" in header: 
-                    current_limit = 0
-                elif any(x in header for x in ["一、", "引言", "结语"]): 
-                    current_limit = int(avg_core_words * 0.6)
-                else:
-                    current_limit = int(avg_core_words * 1.2)
-                
-                self.status_label.configure(text=f"撰写: {header}...", text_color="#1F6AA5")
-                self.progressbar.set(i / len(tasks))
-
-                self.txt_content.insert("end", f"\n\n【{header}】\n")
-                self.txt_content.see("end")
-
-                sys_prompt = f"""
-                你是一位资深教育专家。
-                文体：{mode}
-                风格：{style_cfg['writing_prompt']}
-                {ref_prompt_block}
-                【写作铁律】：
-                1. 严禁复述章节标题！(系统已自动插入，请直接开始写正文)。
-                2. 严禁Markdown（不要**加粗**，不要##标题）。
-                3. 基于提供的资料进行真实分析。
-                4. {prompt_suffix}
-                """
-                
-                user_prompt = f"题目：{topic}\n当前章节：{header}\n包含要点：{sub_points}\n上下文：...{last_paragraph[-150:]}\n字数：约 {current_limit} 字。\n请直接输出正文内容。"
-
-                resp = client.chat.completions.create(
-                    model=self.api_config.get("model"),
-                    messages=[{"role":"system","content":sys_prompt}, {"role":"user","content":user_prompt}],
-                    temperature=0.7,
-                    stream=True
-                )
-                
-                current_section_text = ""
-                header_core = get_core_text(header) # 提取系统标题的核心字
-
-                for chunk in resp:
-                    if self.stop_event.is_set(): break
-                    if chunk.choices[0].delta.content:
-                        content = chunk.choices[0].delta.content
-                        temp_text = current_section_text + content
-                        
-                        # --- 核心修复：外科手术式去重 ---
-                        if "摘要" in header:
-                            if len(temp_text) < 10 and ("摘" in temp_text or "要" in temp_text):
-                                current_section_text += content
-                                continue 
-                            clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
-                            self.txt_content.insert("end", clean_chunk)
-                        else:
-                            # 暂存前 100 字符，用于检测是否包含标题
-                            if len(temp_text) < 100:
-                                current_section_text += content
-                            else:
-                                # 缓冲区满了，或者已经过了开头。
-                                # 检查缓冲区是否包含标题
-                                if current_section_text != "SAFE":
-                                    # 检查相似度
-                                    similarity = difflib.SequenceMatcher(None, header_core, get_core_text(current_section_text)).ratio()
-                                    if similarity > 0.6 or header_core in get_core_text(current_section_text):
-                                        # 发现标题重复！尝试切除第一句
-                                        parts = current_section_text.split('\n', 1)
-                                        if len(parts) > 1:
-                                            self.txt_content.insert("end", parts[1])
-                                        else:
-                                            # 只有一行且是标题，丢弃，只保留新来的content
-                                            pass 
-                                    else:
-                                        # 没有重复，安全上屏
-                                        self.txt_content.insert("end", current_section_text)
-                                    
-                                    current_section_text = "SAFE" # 标记为安全
-                                
-                                # 直接输出新内容
-                                self.txt_content.insert("end", content)
-                        
-                        self.txt_content.see("end")
-                        if len(temp_text) > 50: last_paragraph = temp_text
-                
-                # 循环结束，检查缓冲区是否还有未上屏的内容
-                if current_section_text != "SAFE" and len(current_section_text) > 0:
-                     # 同样的检查逻辑
-                    similarity = difflib.SequenceMatcher(None, header_core, get_core_text(current_section_text)).ratio()
-                    if similarity > 0.6 or header_core in get_core_text(current_section_text):
-                        parts = current_section_text.split('\n', 1)
-                        if len(parts) > 1: self.txt_content.insert("end", parts[1])
-                    else:
-                        self.txt_content.insert("end", current_section_text)
-
-            if not self.stop_event.is_set():
-                self.status_label.configure(text="撰写完成！", text_color="green")
-                self.progressbar.set(1)
-
-        except Exception as e:
-            self.status_label.configure(text=f"API错误: {str(e)}", text_color="red")
-        finally:
-            self.btn_run_write.configure(state="normal")
-
-    # --- 核心升级：导出 Word (智能清洗 Markdown) ---
-    def save_to_word(self):
-        content = self.txt_content.get("0.0", "end").strip()
-        if not content: return
-        
-        file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
-        if file_path:
-            doc = Document()
-            doc.styles['Normal'].font.name = u'Times New Roman'
-            doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
-            
-            p_title = doc.add_paragraph()
-            p_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            run_t = p_title.add_run(self.entry_topic.get())
-            run_t.font.name = u'黑体'
-            run_t._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-            run_t.font.size = Pt(18)
-            run_t.bold = True
-            
-            p_auth = doc.add_paragraph()
-            p_auth.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            run_a = p_auth.add_run(f"{DEV_NAME}\n({DEV_ORG})")
-            run_a.font.name = u'楷体'
-            run_a._element.rPr.rFonts.set(qn('w:eastAsia'), u'楷体')
-            run_a.font.size = Pt(12)
-            
-            doc.add_paragraph() 
-
-            lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if not line: continue
-
-                # 识别系统插入的章节标记
-                if line.startswith("【") and line.endswith("】"):
-                    header = line.replace("【", "").replace("】", "")
-                    
-                    if "摘要" in header or "关键词" in header:
-                        p = doc.add_paragraph()
-                        run = p.add_run(header)
-                        run.bold = True
-                        run.font.name = u'黑体'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-                    elif re.match(r'^[一二三四五六七八九十]+、', header):
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_before = Pt(12)
-                        run = p.add_run(header)
-                        run.bold = True
-                        run.font.size = Pt(14)
-                        run.font.name = u'黑体'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), u'黑体')
-                    else:
-                        p = doc.add_paragraph(header)
-                        p.runs[0].bold = True
-                else:
-                    # 智能清洗 Markdown 痕迹
-                    clean_line = line
-                    
-                    # 1. 加粗处理：**加粗** -> 去掉星号
-                    clean_line = re.sub(r'\*\*(.*?)\*\*', r'\1', clean_line) 
-                    # 2. 标题处理：### 标题 -> 去掉井号
-                    clean_line = re.sub(r'#{1,6}\s?', '', clean_line)
-                    # 3. 列表处理：- 列表 -> 列表
-                    if clean_line.startswith("- "): clean_line = clean_line[2:]
-                    
-                    p = doc.add_paragraph(clean_line)
-                    p.paragraph_format.first_line_indent = Pt(24) 
-                    p.paragraph_format.line_spacing = 1.25
-
-            doc.save(file_path)
-            self.status_label.configure(text=f"已导出纯净版: {os.path.basename(file_path)}", text_color="green")
+        self.setup_ui()
 
     def load_config(self):
-        try:
-            with open("config.json", "r") as f: self.api_config = json.load(f)
-        except: pass
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except:
+                return DEFAULT_CONFIG
+        return DEFAULT_CONFIG
+
     def save_config(self):
-        self.api_config["api_key"] = self.entry_key.get().strip()
-        self.api_config["base_url"] = self.entry_url.get().strip()
-        self.api_config["model"] = self.entry_model.get().strip()
-        with open("config.json", "w") as f: json.dump(self.api_config, f)
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(self.config, f, ensure_ascii=False, indent=4)
+        messagebox.showinfo("成功", "配置已保存！")
+
+    def setup_ui(self):
+        # 侧边导航
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.sidebar = ctk.CTkFrame(self, width=140, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        
+        ctk.CTkLabel(self.sidebar, text=APP_NAME, font=ctk.CTkFont(size=18, weight="bold")).pack(pady=20)
+        
+        self.btn_home = ctk.CTkButton(self.sidebar, text="排版工作台", command=lambda: self.show_frame("home"))
+        self.btn_home.pack(pady=10, padx=10)
+        self.btn_settings = ctk.CTkButton(self.sidebar, text="参数设置", command=lambda: self.show_frame("settings"))
+        self.btn_settings.pack(pady=10, padx=10)
+        self.btn_about = ctk.CTkButton(self.sidebar, text="使用说明", command=lambda: self.show_frame("about"))
+        self.btn_about.pack(pady=10, padx=10)
+
+        # 主内容区
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+
+        self.frames = {}
+        self.create_home_frame()
+        self.create_settings_frame()
+        self.create_about_frame()
+
+        self.show_frame("home")
+
+    def create_home_frame(self):
+        f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.frames["home"] = f
+        
+        # 按钮区
+        btn_box = ctk.CTkFrame(f, fg_color="transparent")
+        btn_box.pack(fill="x", pady=10)
+        
+        ctk.CTkButton(btn_box, text="📂 上传文档 (支持多选)", command=self.upload_files, width=200).pack(side="left", padx=10)
+        ctk.CTkButton(btn_box, text="▶ 开始一键排版", command=self.start_processing, width=200, fg_color="green").pack(side="left", padx=10)
+        self.btn_export = ctk.CTkButton(btn_box, text="💾 导出结果", command=self.export_files, width=200, state="disabled")
+        self.btn_export.pack(side="left", padx=10)
+
+        # 列表区
+        self.file_listbox = ctk.CTkTextbox(f, height=400)
+        self.file_listbox.pack(fill="both", expand=True, pady=10)
+        self.file_listbox.insert("0.0", "请上传 .docx 文档...\n")
+        self.file_listbox.configure(state="disabled")
+
+        # 进度条
+        self.progressbar = ctk.CTkProgressBar(f)
+        self.progressbar.pack(fill="x", pady=10)
+        self.progressbar.set(0)
+        
+        self.status_label = ctk.CTkLabel(f, text="就绪")
+        self.status_label.pack()
+
+    def create_settings_frame(self):
+        f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.frames["settings"] = f
+        
+        ctk.CTkLabel(f, text="排版参数设置 (单位: cm / 磅)", font=("Arial", 20)).pack(pady=20)
+        
+        # 简单的参数输入示例
+        self.entries = {}
+        settings = [
+            ("上边距 (cm)", "top", self.config["margins"]["top"]),
+            ("下边距 (cm)", "bottom", self.config["margins"]["bottom"]),
+            ("左边距 (cm)", "left", self.config["margins"]["left"]),
+            ("右边距 (cm)", "right", self.config["margins"]["right"]),
+            ("行间距 (磅)", "line_spacing", self.config["line_spacing"])
+        ]
+
+        for label_text, key, val in settings:
+            row = ctk.CTkFrame(f, fg_color="transparent")
+            row.pack(fill="x", pady=5)
+            ctk.CTkLabel(row, text=label_text, width=100).pack(side="left")
+            entry = ctk.CTkEntry(row)
+            entry.insert(0, str(val))
+            entry.pack(side="left", fill="x", expand=True)
+            self.entries[key] = entry
+
+        ctk.CTkButton(f, text="保存设置", command=self.update_config).pack(pady=20)
+
+    def create_about_frame(self):
+        f = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.frames["about"] = f
+        
+        info = f"""{APP_NAME}
+版本：{APP_VERSION}
+{AUTHOR_INFO}
+
+【使用说明】
+1. 点击“上传文档”，选择一个或多个 Word (.docx) 文件。
+2. 点击“开始一键排版”，程序将自动处理。
+3. 处理完成后，点击“导出结果”选择保存文件夹。
+
+【排版规则】
+- 自动识别“一、”、“（一）”、“1.”等层级。
+- 自动设置国标版心（上3.7 下3.5 左2.8 右2.6）。
+- 自动设置仿宋、黑体、楷体等公文专用字体。
+- 自动设置固定行距。
+
+注意：请确保电脑安装了“方正小标宋简体”、“仿宋_GB2312”、“楷体_GB2312”等字体，否则显示可能不正确。
+"""
+        lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
+        lbl.insert("0.0", info)
+        lbl.configure(state="disabled")
+        lbl.pack(fill="both", expand=True)
+
+    def show_frame(self, name):
+        for frame in self.frames.values():
+            frame.grid_forget()
+        self.frames[name].grid(row=0, column=0, sticky="nsew")
+
+    def update_config(self):
+        try:
+            self.config["margins"]["top"] = float(self.entries["top"].get())
+            self.config["margins"]["bottom"] = float(self.entries["bottom"].get())
+            self.config["margins"]["left"] = float(self.entries["left"].get())
+            self.config["margins"]["right"] = float(self.entries["right"].get())
+            self.config["line_spacing"] = float(self.entries["line_spacing"].get())
+            self.save_config()
+        except ValueError:
+            messagebox.showerror("错误", "请输入有效的数字")
+
+    def upload_files(self):
+        files = filedialog.askopenfilenames(filetypes=[("Word Document", "*.docx")])
+        if files:
+            self.file_list = list(files)
+            self.log(f"已加载 {len(files)} 个文件。")
+            self.btn_export.configure(state="disabled")
+
+    def log(self, text):
+        self.file_listbox.configure(state="normal")
+        self.file_listbox.delete("0.0", "end")
+        for f in self.file_list:
+            self.file_listbox.insert("end", f"{os.path.basename(f)}\n")
+        self.file_listbox.insert("end", f"\n>>> {text}\n")
+        self.file_listbox.configure(state="disabled")
+
+    def start_processing(self):
+        if not self.file_list:
+            messagebox.showwarning("提示", "请先上传文件")
+            return
+        
+        self.processed_docs = []
+        threading.Thread(target=self.process_thread, daemon=True).start()
+
+    def process_thread(self):
+        total = len(self.file_list)
+        for index, file_path in enumerate(self.file_list):
+            self.status_label.configure(text=f"正在处理: {os.path.basename(file_path)}...")
+            self.progressbar.set((index) / total)
+            
+            try:
+                doc = self.format_document(file_path)
+                self.processed_docs.append((file_path, doc))
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
+            
+            self.progressbar.set((index + 1) / total)
+        
+        self.status_label.configure(text="处理完成！请点击导出。")
+        self.btn_export.configure(state="normal")
+
+    def export_files(self):
+        save_dir = filedialog.askdirectory()
+        if not save_dir: return
+        
+        for original_path, doc in self.processed_docs:
+            filename = os.path.basename(original_path)
+            # 添加 "_排版后" 后缀，或者直接覆盖，这里选择保留原名但在新文件夹
+            save_path = os.path.join(save_dir, filename)
+            doc.save(save_path)
+        
+        messagebox.showinfo("完成", f"所有文件已导出至 {save_dir}")
+        os.startfile(save_dir) if os.name == 'nt' else None
+
+    # --- 核心排版逻辑 ---
+    def format_document(self, file_path):
+        doc = Document(file_path)
+        cfg = self.config
+
+        # 1. 页面设置
+        section = doc.sections[0]
+        section.top_margin = Cm(cfg["margins"]["top"])
+        section.bottom_margin = Cm(cfg["margins"]["bottom"])
+        section.left_margin = Cm(cfg["margins"]["left"])
+        section.right_margin = Cm(cfg["margins"]["right"])
+        
+        # 尝试设置文档网格 (python-docx对此支持有限，通过行距模拟)
+        # 2. 样式处理
+        self.set_default_style(doc)
+
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if not text:
+                continue
+
+            # 设置固定行距
+            paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+            paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
+
+            # 标题识别与字体设置
+            # 标题 (简单假设第一段是标题，实际可能需要更复杂的逻辑)
+            if paragraph == doc.paragraphs[0] and len(text) < 30: 
+                self.set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                continue
+
+            # 一级标题 (一、)
+            if re.match(r"^[一二三四五六七八九十]+、", text):
+                self.set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False) # 黑体本身不需要加粗
+                continue
+
+            # 二级标题 ( (一) )
+            if re.match(r"^（[一二三四五六七八九十]+）", text):
+                self.set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
+                continue
+
+            # 三级标题 ( 1. )
+            if re.match(r"^\d+\.", text):
+                self.set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True) # 仿宋加粗
+                continue
+
+            # 正文
+            self.set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
+            paragraph.paragraph_format.first_line_indent = Pt(cfg["sizes"]["body"] * 2) # 首行缩进2字符
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+
+        # 表格处理
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        self.set_font(p, "仿宋_GB2312", 14) # 表格内容通常小一号
+
+        # 页码处理 (python-docx 插入页码非常复杂，通常需要底层XML操作)
+        # 这里使用一种简化的 Footer 插入方式
+        self.add_page_number(doc.sections[0].footer.paragraphs[0])
+
+        return doc
+
+    def set_font(self, paragraph, font_name, font_size, bold=False):
+        for run in paragraph.runs:
+            run.font.name = font_name
+            run.font.size = Pt(font_size)
+            run.bold = bold
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+
+    def set_default_style(self, doc):
+        style = doc.styles['Normal']
+        style.font.name = 'Times New Roman' # 西文
+        style.font.size = Pt(16)
+        style._element.rPr.rFonts.set(qn('w:eastAsia'), self.config["fonts"]["body"])
+
+    def add_page_number(self, paragraph):
+        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        run = paragraph.add_run()
+        fldChar1 = OxmlElement('w:fldChar')
+        fldChar1.set(qn('w:fldCharType'), 'begin')
+        instrText = OxmlElement('w:instrText')
+        instrText.set(qn('xml:space'), 'preserve')
+        instrText.text = "PAGE"
+        fldChar2 = OxmlElement('w:fldChar')
+        fldChar2.set(qn('w:fldCharType'), 'end')
+        run._r.append(fldChar1)
+        run._r.append(instrText)
+        run._r.append(fldChar2)
+        # 简单设置页码字体
+        run.font.name = "宋体"
+        run.font.size = Pt(14)
 
 if __name__ == "__main__":
-    app = MasterWriterApp()
+    app = GongWenFormatterApp()
     app.mainloop()
