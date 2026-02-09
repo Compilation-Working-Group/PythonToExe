@@ -5,17 +5,13 @@ on:
 
 jobs:
   build:
-    # 动态指定运行环境
-    name: Build on ${{ matrix.config.os }}
-    runs-on: ${{ matrix.config.os }}
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - { os: windows-latest, name: Windows, sep: '\' }
-          # 【修改点】将 20.04 改为 22.04，解决一直排队等待的问题
-          - { os: ubuntu-22.04, name: Linux, sep: '/' }
-          - { os: macos-latest, name: macOS, sep: '/' }
+        # 恢复您习惯的 latest 配置
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
     - uses: actions/checkout@v4
@@ -30,39 +26,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Linux 依赖安装
+    # Linux 必须装这个，否则编译出来的软件就是个空壳，运行必闪退
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev libx11-dev
 
-    # Windows 打包
-    - name: Build Windows
-      if: runner.os == 'Windows'
+    # 核心修复：添加 shell: bash
+    # 这让 Windows 也能看懂 Linux 的命令，解决 "ParserError"
+    - name: Build with PyInstaller
       shell: bash
-      run: |
-        pyinstaller --name="PaperAI" --onefile --windowed --clean \
-        --collect-all customtkinter \
-        --collect-all docx \
-        --collect-all openai \
-        --hidden-import=docx \
-        --hidden-import=openai \
-        main.py
-
-    # Linux 打包 (无windowed，方便调试)
-    - name: Build Linux
-      if: runner.os == 'Linux'
-      run: |
-        pyinstaller --name="PaperAI" --onefile --clean \
-        --collect-all customtkinter \
-        --collect-all docx \
-        --collect-all openai \
-        --hidden-import=docx \
-        --hidden-import=openai \
-        main.py
-
-    # macOS 打包
-    - name: Build macOS
-      if: runner.os == 'macOS'
       run: |
         pyinstaller --name="PaperAI" --onefile --windowed --clean \
         --collect-all customtkinter \
