@@ -1,34 +1,113 @@
-name: Build and Release
+name: Build and Release Academic Writer
 
 on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      build_for:
+        description: 'Build for platform (all, windows, macos, linux)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - linux
+      python_version:
+        description: 'Python version'
+        required: true
+        default: '3.10'
+        type: choice
+        options:
+          - '3.8'
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+  # 推送标签时自动构建
   push:
     tags:
       - 'v*'
-  pull_request:
+  # 在main分支有推送时也构建
+  push:
     branches: [ main ]
-  workflow_dispatch:
+
+# 设置权限
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+  build-windows:
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'windows')
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ github.event.inputs.python_version || '3.10' }}
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller
+        pip install pyinstaller pywin32
+    
+    - name: Create necessary directories
+      run: |
+        mkdir output
+        mkdir templates
+        mkdir config
+        mkdir assets
+    
+    - name: Build Windows executable
+      run: |
+        python build_exe.py
+    
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriter-Windows
+        path: dist/
+        if-no-files-found: error
+    
+    - name: Create release archive for Windows
+      run: |
+        cd dist
+        7z a AcademicWriter-Windows.zip AcademicWriterPro.exe
+        cd ..
+    
+    - name: Upload Windows zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriter-Windows-zip
+        path: dist/AcademicWriter-Windows.zip
+
+  build-macos:
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'macos')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ github.event.inputs.python_version || '3.10' }}
+    
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install -r requirements.txt
+        pip3 install pyinstaller
     
     - name: Create necessary directories
       run: |
@@ -37,35 +116,157 @@ jobs:
         mkdir -p config
         mkdir -p assets
     
-    - name: Build executable
+    - name: Build macOS application
       run: |
-        python build_exe.py
+        python3 build_exe.py
     
-    - name: Upload artifacts
+    - name: Create macOS .app bundle
+      run: |
+        # 如果需要创建 .app 包，可以在这里添加命令
+        echo "macOS build complete"
+    
+    - name: Upload macOS artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AcademicWriterPro-${{ matrix.os }}-${{ matrix.python-version }}
-        path: |
-          dist/
-          output/
-          templates/
-          config/
+        name: AcademicWriter-macOS
+        path: dist/
     
-  release:
-    needs: build
+    - name: Create DMG for macOS (optional)
+      run: |
+        echo "Creating DMG package"
+        hdiutil create -volname "Academic Writer" -srcfolder dist -ov -format UDZO AcademicWriter-macOS.dmg
+    
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriter-macOS-dmg
+        path: AcademicWriter-macOS.dmg
+        if-no-files-found: warn
+
+  build-linux:
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.build_for == 'all' || github.event.inputs.build_for == 'linux')
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
     
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ github.event.inputs.python_version || '3.10' }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-dev
+        sudo apt-get install -y libx11-dev libxext-dev libxft-dev libxinerama-dev libxcursor-dev libxrender-dev libxfixes-dev libxrandr-dev libxi-dev
+    
+    - name: Install Python dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install -r requirements.txt
+        pip3 install pyinstaller
+    
+    - name: Create necessary directories
+      run: |
+        mkdir -p output
+        mkdir -p templates
+        mkdir -p config
+        mkdir -p assets
+    
+    - name: Build Linux executable
+      run: |
+        python3 build_exe.py
+    
+    - name: Make Linux executable
+      run: |
+        chmod +x dist/AcademicWriterPro
+    
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriter-Linux
+        path: dist/
+    
+    - name: Create tarball for Linux
+      run: |
+        tar -czvf AcademicWriter-Linux.tar.gz -C dist .
+    
+    - name: Upload Linux tarball
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriter-Linux-tar
+        path: AcademicWriter-Linux.tar.gz
+
+  # 自动发布到Release
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
         path: artifacts
     
-    - name: Create release
+    - name: Display structure of downloaded files
+      run: ls -R artifacts
+    
+    - name: Create Release
+      id: create_release
       uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: artifacts/**/*
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
         generate_release_notes: true
+    
+    - name: Upload Release Assets
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # 上传所有构建文件
+        for file in artifacts/**/*; do
+          if [ -f "$file" ]; then
+            echo "Uploading $file"
+            gh release upload ${{ github.ref_name }} "$file" --clobber
+          fi
+        done
+
+  # 测试构建矩阵（可选）
+  test-build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run basic tests
+      run: |
+        python -c "import tkinter; print('Tkinter available')"
+        python -c "import openai; print('OpenAI available')"
+        python -c "from PIL import Image; print('Pillow available')"
+        echo "Basic import tests passed"
