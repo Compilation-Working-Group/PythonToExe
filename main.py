@@ -13,7 +13,7 @@ APP_NAME = "PaperWriter"
 APP_ORG = "YuJinQuanLab"
 SETTINGS_FILE = "settings.json"
 
-# DeepSeek defaults (OpenAI-compatible API) [6](https://cloud.tencent.com/document/product/1772/115969)
+# DeepSeek defaults (OpenAI-compatible) [5](https://www.cnblogs.com/bibaodi/p/18925124)
 DEFAULT_API_BASE = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 
@@ -24,7 +24,7 @@ DEFAULT_MODEL = "deepseek-chat"
 def linux_preflight_check():
     """
     Check critical runtime libs before creating QApplication to avoid Qt core dump.
-    Qt 6.5+ needs libxcb-cursor0 to load xcb platform plugin. [1](https://www.cnblogs.com/gccbuaa/p/19254097)[2](https://github.com/pyinstaller/pyinstaller/issues/5414)
+    Qt 6.5+ needs libxcb-cursor0 to load xcb platform plugin. [6](https://blog.csdn.net/m0_46144825/article/details/122462453)[7](https://fcitx-im.org/wiki/Input_method_related_environment_variables/zh-hans)
     """
     if not sys.platform.startswith("linux"):
         return
@@ -46,13 +46,12 @@ def linux_preflight_check():
             "",
             "缺少：",
         ]
-        for so_name, hint in missing:
+        for so_name, _ in missing:
             msg_lines.append(f"  - {so_name}")
         msg_lines += [
             "",
             "在 Ubuntu/Debian 上可执行：",
         ]
-        # 去重提示
         hints = sorted(set(hint for _, hint in missing))
         for h in hints:
             msg_lines.append(f"  {h}")
@@ -79,7 +78,7 @@ def _choose_qt_im_module(qt_plugins_dir: Optional[str]) -> Optional[str]:
     """
     Prefer fcitx if its plugin exists, otherwise ibus.
     Reason: PySide6 commonly includes ibus plugin but not fcitx plugin,
-    causing Chinese input failure on fcitx5 systems. [3](https://blog.csdn.net/gitblog_00511/article/details/148916652)[4](https://deepwiki.com/pypa/cibuildwheel/4.1-github-actions-integration)
+    causing Chinese input failure on fcitx5 systems. [2](https://stackoverflow.com/questions/51778203/permission-error-when-trying-to-use-pyinstaller)[3](https://blog.csdn.net/qq_48379015/article/details/153739176)
     """
     if not qt_plugins_dir:
         return None
@@ -105,10 +104,8 @@ def qt_env_fixups():
     """
     qt_plugins = _find_pyside_qt_plugins_dir()
     if qt_plugins:
-        # Ensure Qt can find plugins/platforms in frozen app
         os.environ.setdefault("QT_PLUGIN_PATH", qt_plugins)
         os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", os.path.join(qt_plugins, "platforms"))
-        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "qt6ct")  # harmless if absent
 
         # Pick input method module if user didn't set it
         if not os.environ.get("QT_IM_MODULE"):
@@ -116,7 +113,7 @@ def qt_env_fixups():
             if chosen:
                 os.environ["QT_IM_MODULE"] = chosen
 
-    # Do not override user's env if already set; only set safe defaults
+    # Respect user's env; set a safe default only if unset
     if sys.platform.startswith("linux"):
         os.environ.setdefault("XMODIFIERS", os.environ.get("XMODIFIERS", "@im=fcitx"))
 
@@ -186,9 +183,8 @@ class LLMConfig:
 class OpenAICompatClient:
     """
     OpenAI-compatible Chat Completions client.
-    DeepSeek docs: base_url can be https://api.deepseek.com (or /v1 for compatibility),
-    endpoint is /chat/completions, models deepseek-chat / deepseek-reasoner. [6](https://cloud.tencent.com/document/product/1772/115969)
-    For standard OpenAI-style base (e.g., https://api.openai.com), endpoint is /v1/chat/completions.
+    DeepSeek: base_url can be https://api.deepseek.com (or /v1 for compatibility),
+    endpoint is /chat/completions, models deepseek-chat / deepseek-reasoner. [5](https://www.cnblogs.com/bibaodi/p/18925124)
     """
     def __init__(self, cfg: LLMConfig, logger):
         self.cfg = cfg
@@ -203,7 +199,7 @@ class OpenAICompatClient:
         if base.endswith("/v1"):
             return base + "/chat/completions"
 
-        # DeepSeek canonical endpoint uses /chat/completions under base_url. [6](https://cloud.tencent.com/document/product/1772/115969)
+        # DeepSeek canonical endpoint uses /chat/completions under base_url. [5](https://www.cnblogs.com/bibaodi/p/18925124)
         if "api.deepseek.com" in base:
             return base + "/chat/completions"
 
@@ -759,7 +755,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 # ---------------------------
-# CLI (optional) + self-test
+# CLI + self-test (for CI)
 # ---------------------------
 def run_cli_if_requested():
     import argparse
@@ -772,7 +768,6 @@ def run_cli_if_requested():
     args, _ = parser.parse_known_args()
 
     if args.selftest:
-        # Minimal headless test used in CI (Linux offscreen)
         print("SELFTEST_OK")
         sys.exit(0)
 
@@ -803,12 +798,10 @@ def run_cli_if_requested():
 def main():
     run_cli_if_requested()
 
-    # Must be before QApplication
     linux_preflight_check()
     qt_env_fixups()
 
     app = QtWidgets.QApplication(sys.argv)
-
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
