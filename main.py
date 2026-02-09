@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v21.0.1 (Fixed Variable Bug)"
+APP_VERSION = "v22.0.0 (Smart Header Filter + Safe Cleaning)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 
@@ -256,27 +256,48 @@ class MasterWriterApp(ctk.CTk):
         finally:
             self.btn_gen_outline.configure(state="normal")
 
-    # --- 撰写全文 (修复了变量名错误) ---
+    # --- 撰写全文 (关键修复逻辑) ---
     def run_full_write(self):
         self.stop_event.clear()
+        
+        # 1. 获取大纲
         outline_raw = self.txt_outline.get("0.0", "end").strip()
         if len(outline_raw) < 5:
             self.status_label.configure(text="请先生成或输入大纲", text_color="red")
             return
             
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
+        
+        # === 关键修复：智能滤除标题行 ===
+        # 如果大纲第一行和文章标题高度相似（超过50%匹配），则认为是标题行，删除它
+        if len(lines) > 0:
+            first_line = lines[0]
+            topic = self.entry_topic.get().strip()
+            # 简单模糊匹配：如果标题核心词在第一行里
+            if len(topic) > 2 and topic[:4] in first_line:
+                print(f"检测到标题行，已自动过滤: {first_line}")
+                lines = lines[1:]
+
+        # 2. 智能切分大纲
         tasks = []
         current_task = []
         for line in lines:
             is_header = False
+            # 兼容多种大纲格式
             if re.match(r'^[一二三四五六七八九十]+、', line): is_header = True
             if "摘要" in line or "参考文献" in line: is_header = True
+            
             if is_header:
                 if current_task: tasks.append(current_task)
                 current_task = [line]
             else:
                 current_task.append(line)
         if current_task: tasks.append(current_task)
+
+        # 确保有任务
+        if not tasks:
+            self.status_label.configure(text="大纲格式无法识别，请确保包含'一、'或'摘要'", text_color="red")
+            return
 
         topic = self.entry_topic.get()
         mode = self.combo_mode.get()
@@ -296,6 +317,7 @@ class MasterWriterApp(ctk.CTk):
         
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
         
+        # 字数计算
         core_tasks = [t for t in tasks if "摘要" not in t[0] and "参考文献" not in t[0]]
         core_count = len(core_tasks) if len(core_tasks) > 0 else 1
         
@@ -304,7 +326,7 @@ class MasterWriterApp(ctk.CTk):
         
         available_words = total_words - reserved_words
         if available_words < 500: available_words = 500
-        avg_core_words = available_words // core_count # 定义正确变量
+        avg_core_words = available_words // core_count
 
         last_paragraph = "（文章刚开始，暂无上文）"
 
@@ -315,44 +337,46 @@ class MasterWriterApp(ctk.CTk):
                 header = task_lines[0]
                 sub_points = "\n".join(task_lines[1:])
                 
-                # 修复：确保使用 avg_core_words
-                current_limit = avg_core_words 
-                if "摘要" in header: current_limit = 300
-                elif "参考文献" in header: current_limit = 0
+                # 动态参数
+                current_limit = avg_core_words
+                prompt_suffix = ""
+                
+                if "摘要" in header: 
+                    current_limit = 300
+                    prompt_suffix = "【特殊要求】：必须在摘要下方另起一行，列出3-5个【关键词】。"
+                elif "参考文献" in header: 
+                    current_limit = 0
                 elif any(x in header for x in ["一、", "引言", "结语"]): 
                     current_limit = int(avg_core_words * 0.6)
                 else:
                     current_limit = int(avg_core_words * 1.2)
                 
-                self.status_label.configure(text=f"撰写: {header} (约{current_limit}字)...", text_color="#1F6AA5")
+                self.status_label.configure(text=f"撰写: {header}...", text_color="#1F6AA5")
                 self.progressbar.set(i / len(tasks))
 
                 self.txt_content.insert("end", f"\n\n【{header}】\n")
                 self.txt_content.see("end")
 
                 sys_prompt = f"""
-                你是一位资深教育专家，正在辅助俞晋全老师撰写文稿。
+                你是一位资深教育专家。
                 文体：{mode}
                 风格要求：{style_cfg['writing_prompt']}
                 
                 【写作铁律】：
-                1. 严禁复述章节标题（标题已自动插入）。
+                1. 严禁复述章节标题！(系统已自动插入)。
                 2. 严禁Markdown格式。
-                3. 内容务实，拒绝空洞套话。必须结合具体案例。
-                4. 用户指令：{instr}
+                3. 内容务实，拒绝空洞套话。
+                4. {prompt_suffix}
                 """
                 
                 user_prompt = f"""
                 题目：{topic}
                 当前章节：{header}
-                包含要点：
-                {sub_points}
+                要点：{sub_points}
                 
-                【上下文衔接】：
-                上一章的结尾是："{last_paragraph[-200:]}"
-                请顺着这个脉络，撰写本章内容，保持文章连贯性。
+                上下文：...{last_paragraph[-150:]}
                 
-                字数控制：约 {current_limit} 字。
+                字数：约 {current_limit} 字。
                 请直接输出正文。
                 """
 
@@ -363,18 +387,25 @@ class MasterWriterApp(ctk.CTk):
                 )
                 
                 raw = resp.choices[0].message.content
-                
                 clean_text = raw.strip()
-                lines = clean_text.split('\n')
-                if len(lines) > 0 and (header[:4] in lines[0] or "摘要" in lines[0]):
-                    clean_text = "\n".join(lines[1:]).strip()
+                
+                # === 关键修复：温柔清洗算法 ===
+                # 如果是摘要，只去掉"摘要："前缀，保留内容
+                if "摘要" in header:
+                    clean_text = re.sub(r'^【?摘要】?[:：]?\s*', '', clean_text)
+                else:
+                    # 其他章节，如果第一行和标题重复，则删除第一行
+                    lines_content = clean_text.split('\n')
+                    if len(lines_content) > 0:
+                        # 提取标题核心词（去掉一、二、）
+                        header_core = re.sub(r'^[一二三四五六七八九十]+、', '', header)
+                        if header_core in lines_content[0]:
+                            clean_text = "\n".join(lines_content[1:]).strip()
 
                 self.txt_content.insert("end", clean_text)
                 self.txt_content.see("end")
                 
-                if len(clean_text) > 50:
-                    last_paragraph = clean_text
-                
+                if len(clean_text) > 50: last_paragraph = clean_text
                 time.sleep(0.5)
 
             if not self.stop_event.is_set():
