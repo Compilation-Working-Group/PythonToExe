@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v21.0.0 (Context Aware + Weighted Length)"
+APP_VERSION = "v21.0.1 (Fixed Variable Bug)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 
@@ -256,7 +256,7 @@ class MasterWriterApp(ctk.CTk):
         finally:
             self.btn_gen_outline.configure(state="normal")
 
-    # --- 撰写全文 (核心优化：字数权重 + 上下文记忆) ---
+    # --- 撰写全文 (修复了变量名错误) ---
     def run_full_write(self):
         self.stop_event.clear()
         outline_raw = self.txt_outline.get("0.0", "end").strip()
@@ -264,7 +264,6 @@ class MasterWriterApp(ctk.CTk):
             self.status_label.configure(text="请先生成或输入大纲", text_color="red")
             return
             
-        # 智能切分大纲（按一级标题打包）
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
         tasks = []
         current_task = []
@@ -297,20 +296,16 @@ class MasterWriterApp(ctk.CTk):
         
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
         
-        # 计算核心任务数 (排除摘要和参考文献)
         core_tasks = [t for t in tasks if "摘要" not in t[0] and "参考文献" not in t[0]]
         core_count = len(core_tasks) if len(core_tasks) > 0 else 1
         
-        # 预留固定字数
         reserved_words = 0
         if any("摘要" in t[0] for t in tasks): reserved_words += 300
         
-        # 剩余字数分配给核心章节
         available_words = total_words - reserved_words
         if available_words < 500: available_words = 500
-        avg_core_words = available_words // core_count
+        avg_core_words = available_words // core_count # 定义正确变量
 
-        # 上下文记忆缓冲区
         last_paragraph = "（文章刚开始，暂无上文）"
 
         try:
@@ -320,14 +315,14 @@ class MasterWriterApp(ctk.CTk):
                 header = task_lines[0]
                 sub_points = "\n".join(task_lines[1:])
                 
-                # 智能权重分配
-                current_limit = avg_words
+                # 修复：确保使用 avg_core_words
+                current_limit = avg_core_words 
                 if "摘要" in header: current_limit = 300
                 elif "参考文献" in header: current_limit = 0
                 elif any(x in header for x in ["一、", "引言", "结语"]): 
-                    current_limit = int(avg_words * 0.6) # 开头结尾少写点
+                    current_limit = int(avg_core_words * 0.6)
                 else:
-                    current_limit = int(avg_words * 1.2) # 中间核心多写点
+                    current_limit = int(avg_core_words * 1.2)
                 
                 self.status_label.configure(text=f"撰写: {header} (约{current_limit}字)...", text_color="#1F6AA5")
                 self.progressbar.set(i / len(tasks))
@@ -369,7 +364,6 @@ class MasterWriterApp(ctk.CTk):
                 
                 raw = resp.choices[0].message.content
                 
-                # 清洗标题重复
                 clean_text = raw.strip()
                 lines = clean_text.split('\n')
                 if len(lines) > 0 and (header[:4] in lines[0] or "摘要" in lines[0]):
@@ -378,7 +372,6 @@ class MasterWriterApp(ctk.CTk):
                 self.txt_content.insert("end", clean_text)
                 self.txt_content.see("end")
                 
-                # 更新上下文记忆
                 if len(clean_text) > 50:
                     last_paragraph = clean_text
                 
@@ -403,7 +396,6 @@ class MasterWriterApp(ctk.CTk):
             doc.styles['Normal'].font.name = u'Times New Roman'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
-            # 标题
             p_title = doc.add_paragraph()
             p_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             run_t = p_title.add_run(self.entry_topic.get())
@@ -412,7 +404,6 @@ class MasterWriterApp(ctk.CTk):
             run_t.font.size = Pt(18)
             run_t.bold = True
             
-            # 作者
             p_auth = doc.add_paragraph()
             p_auth.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             run_a = p_auth.add_run(f"{DEV_NAME}\n({DEV_ORG})")
