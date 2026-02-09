@@ -7,10 +7,11 @@ from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import json
 import time
 import re
+import difflib # 新增：用于模糊匹配去重
 
 # --- 依赖库检测 ---
 try:
@@ -33,7 +34,7 @@ if sys.platform.startswith('linux'):
             os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v31.0.0 (Excel Filtering + Data Analysis)"
+APP_VERSION = "v32.0.0 (Smart Clean + Excel Filter)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 
@@ -163,6 +164,7 @@ class MasterWriterApp(ctk.CTk):
         self.paned_frame.grid_columnconfigure(1, weight=2) 
         self.paned_frame.grid_rowconfigure(1, weight=1)
 
+        # 左侧大纲
         outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         outline_frame.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(outline_frame, text="Step 1: 智能大纲 (AI根据题目生成)", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
@@ -176,9 +178,10 @@ class MasterWriterApp(ctk.CTk):
         self.btn_gen_outline.pack(side="left", padx=5)
         ctk.CTkButton(btn_o_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
 
+        # 右侧正文
         content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         content_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写", text_color="#2CC985", font=("bold", 13)).pack(side="left")
+        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (自动清洗重复标题)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
         self.status_label = ctk.CTkLabel(content_frame, text="就绪", text_color="gray")
         self.status_label.pack(side="right")
 
@@ -218,7 +221,7 @@ class MasterWriterApp(ctk.CTk):
         self.entry_model.pack(pady=5)
         ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
 
-    # --- 核心升级：多格式文件读取与预筛选 ---
+    # --- 核心升级：Excel 筛选与多格式读取 ---
     def load_reference_file(self):
         filetypes = [
             ("All Supported", "*.docx *.pdf *.xlsx *.txt *.md *.csv *.py *.json"),
@@ -233,39 +236,41 @@ class MasterWriterApp(ctk.CTk):
         filename = os.path.basename(filepath)
         ext = os.path.splitext(filepath)[1].lower()
         content = ""
+        filter_key = ""
         
         try:
-            # 1. Excel (.xlsx) - 新增预筛选功能
+            # 1. Excel (.xlsx) - 支持班级/关键词筛选
             if ext in [".xlsx", ".xls"]:
                 if openpyxl is None: raise ImportError("缺少 openpyxl")
                 
-                # 弹出筛选对话框
-                filter_dialog = ctk.CTkInputDialog(text="【Excel数据预筛选】\n若需提取特定班级(如'高二1班')，请输入关键词。\n若分析全部数据，请直接点击OK。", title="数据筛选")
-                filter_key = filter_dialog.get_input()
-                if filter_key is None: filter_key = "" # 用户点击Cancel算空
+                # 弹出对话框，询问筛选关键词
+                dialog = ctk.CTkInputDialog(text="【Excel数据预筛选】\n请输入要提取的关键词（如 '高二1班'）。\n若需全部分析，请留空直接点击OK。", title="数据筛选")
+                filter_key = dialog.get_input()
+                if filter_key is None: filter_key = "" # Cancel = empty
                 filter_key = filter_key.strip()
 
                 wb = openpyxl.load_workbook(filepath, data_only=True)
                 for sheet in wb:
-                    content += f"\n--- Sheet: {sheet.title} ---\n"
+                    sheet_data = []
                     rows = list(sheet.iter_rows(values_only=True))
                     if not rows: continue
                     
-                    # 总是保留表头(第一行)
+                    # 永远保留表头
                     header = rows[0]
-                    content += ",".join([str(c) if c else "" for c in header]) + "\n"
+                    # 转CSV格式，更利于AI理解
+                    sheet_data.append(",".join([str(c) if c else "" for c in header]))
                     
-                    # 遍历数据行
                     match_count = 0
                     for row in rows[1:]:
-                        row_text = ",".join([str(c) if c else "" for c in row])
-                        # 如果没有筛选词，或者筛选词在行中，则保留
-                        if not filter_key or (filter_key in row_text):
-                            content += row_text + "\n"
+                        row_str = ",".join([str(c) if c else "" for c in row])
+                        # 核心筛选逻辑：如果没有关键词，或者关键词在行内，则保留
+                        if not filter_key or (filter_key in row_str):
+                            sheet_data.append(row_str)
                             match_count += 1
                     
-                    if filter_key:
-                        print(f"Sheet {sheet.title}: 筛选 '{filter_key}' 匹配到 {match_count} 行")
+                    if len(sheet_data) > 1: # 有数据（不仅是表头）
+                        content += f"\n--- Sheet: {sheet.title} (匹配到 {match_count} 行) ---\n"
+                        content += "\n".join(sheet_data) + "\n"
 
             # 2. Word (.docx)
             elif ext == ".docx":
@@ -288,16 +293,15 @@ class MasterWriterApp(ctk.CTk):
             content = content.strip()
             if not content: raise ValueError("文件内容为空或筛选后无数据")
                 
-            self.reference_content = content[:15000] # 放宽到1.5万字
-            if len(content) > 15000: self.reference_content += "\n...(内容过长，已截取)"
+            self.reference_content = content[:20000] # 放宽到2万字
+            if len(content) > 20000: self.reference_content += "\n...(内容过长，已截取)"
             
             status_msg = f"已挂载: {filename}"
-            if "xlsx" in ext and filter_key:
-                status_msg += f" (筛选: {filter_key})"
+            if filter_key: status_msg += f" (筛选: {filter_key})"
             
             self.lbl_ref_status.configure(text=status_msg, text_color="green")
             self.btn_clear_ref.configure(state="normal")
-            messagebox.showinfo("成功", f"文件解析成功！\n共读取 {len(content)} 字符。\nAI将基于此数据进行分析。")
+            messagebox.showinfo("成功", f"文件解析成功！\nAI将基于此数据进行分析。")
             
         except Exception as e:
             messagebox.showerror("读取失败", f"无法读取: {str(e)}")
@@ -305,6 +309,7 @@ class MasterWriterApp(ctk.CTk):
     def clear_reference_file(self):
         self.reference_content = ""
         self.lbl_ref_status.configure(text="未上传 (AI将基于通用知识写作)", text_color="gray")
+        self.btn_clear_ref.configure(state="disabled")
         messagebox.showinfo("已清除", "参考资料已清空。")
 
     def on_mode_change(self, choice):
@@ -315,6 +320,7 @@ class MasterWriterApp(ctk.CTk):
         self.txt_instructions.insert("0.0", config.get("default_instruction", ""))
         self.entry_words.delete(0, "end")
         self.entry_words.insert(0, config.get("default_words", "3000"))
+        
         self.txt_outline.delete("0.0", "end")
         self.txt_outline.insert("0.0", f"（已切换至【{choice}】模式，请点击“生成/重置大纲”...）")
 
@@ -355,7 +361,7 @@ class MasterWriterApp(ctk.CTk):
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
         ref_hint = ""
         if self.reference_content:
-            ref_hint = f"【数据/资料背景】：用户上传了详细资料（包含数据/案例），请务必在构建大纲时考虑如何展示这些数据。"
+            ref_hint = f"【资料背景】：用户提供了数据/资料（{len(self.reference_content)}字），请务必在构建大纲时，安排章节来分析这些数据。"
 
         prompt = f"""
         任务：为《{topic}》写一份【{mode}】的详细大纲。
@@ -399,6 +405,7 @@ class MasterWriterApp(ctk.CTk):
         if len(lines) > 0:
             first_line = lines[0]
             topic = self.entry_topic.get().strip()
+            # 智能滤除第一行如果它像标题
             if len(topic) > 2 and topic[:4] in first_line:
                 lines = lines[1:]
 
@@ -406,6 +413,7 @@ class MasterWriterApp(ctk.CTk):
         current_task = []
         for line in lines:
             is_header = False
+            # 强化标题识别逻辑
             if re.match(r'^[一二三四五六七八九十]+、', line): is_header = True
             if re.match(r'^第[一二三四五六七八九十]+部分', line): is_header = True
             if "摘要" in line or "参考文献" in line: is_header = True
@@ -452,15 +460,18 @@ class MasterWriterApp(ctk.CTk):
         ref_prompt_block = ""
         if self.reference_content:
             ref_prompt_block = f"""
-            【核心数据/资料库】：
-            以下是用户提供的真实数据或资料，请务必基于这些数据进行分析和写作，不要编造数据。
-            如果包含成绩或统计，请进行横向/纵向对比分析。
+            【重要参考资料】：
+            以下是用户提供的真实数据或资料。请务必：
+            1. 分析这些数据。
+            2. 在正文中引用数据作为论据。
+            3. 保持数据真实性，不要编造。
             
             {self.reference_content}
             ------------------------------------------------
             """
 
         def get_core_text(t):
+            # 提取汉字，用于比对
             return re.sub(r'[^\u4e00-\u9fa50-9]', '', t)
 
         try:
@@ -494,13 +505,13 @@ class MasterWriterApp(ctk.CTk):
                 风格：{style_cfg['writing_prompt']}
                 {ref_prompt_block}
                 【写作铁律】：
-                1. 严禁复述章节标题！
+                1. 严禁复述章节标题！(系统已自动插入，请直接开始写正文)。
                 2. 严禁Markdown（不要**加粗**，不要##标题）。
                 3. 基于提供的资料进行真实分析。
                 4. {prompt_suffix}
                 """
                 
-                user_prompt = f"题目：{topic}\n章节：{header}\n要点：{sub_points}\n上下文：...{last_paragraph[-150:]}\n字数：约 {current_limit} 字。\n请输出纯文本。"
+                user_prompt = f"题目：{topic}\n当前章节：{header}\n包含要点：{sub_points}\n上下文：...{last_paragraph[-150:]}\n字数：约 {current_limit} 字。\n请直接输出正文内容。"
 
                 resp = client.chat.completions.create(
                     model=self.api_config.get("model"),
@@ -510,13 +521,15 @@ class MasterWriterApp(ctk.CTk):
                 )
                 
                 current_section_text = ""
-                
+                header_core = get_core_text(header) # 提取系统标题的核心字
+
                 for chunk in resp:
                     if self.stop_event.is_set(): break
                     if chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         temp_text = current_section_text + content
                         
+                        # --- 核心修复：外科手术式去重 ---
                         if "摘要" in header:
                             if len(temp_text) < 10 and ("摘" in temp_text or "要" in temp_text):
                                 current_section_text += content
@@ -524,25 +537,44 @@ class MasterWriterApp(ctk.CTk):
                             clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
                             self.txt_content.insert("end", clean_chunk)
                         else:
-                            header_fingerprint = get_core_text(header)
-                            temp_fingerprint = get_core_text(temp_text)
-                            
-                            if len(temp_text) < 50 and header_fingerprint in temp_fingerprint:
+                            # 暂存前 100 字符，用于检测是否包含标题
+                            if len(temp_text) < 100:
                                 current_section_text += content
                             else:
-                                if len(current_section_text) > 0 and len(current_section_text) < 50:
-                                    if header_fingerprint in get_core_text(current_section_text):
+                                # 缓冲区满了，或者已经过了开头。
+                                # 检查缓冲区是否包含标题
+                                if current_section_text != "SAFE":
+                                    # 检查相似度
+                                    similarity = difflib.SequenceMatcher(None, header_core, get_core_text(current_section_text)).ratio()
+                                    if similarity > 0.6 or header_core in get_core_text(current_section_text):
+                                        # 发现标题重复！尝试切除第一句
                                         parts = current_section_text.split('\n', 1)
-                                        if len(parts) > 1: self.txt_content.insert("end", parts[1] + content)
-                                        else: self.txt_content.insert("end", content)
+                                        if len(parts) > 1:
+                                            self.txt_content.insert("end", parts[1])
+                                        else:
+                                            # 只有一行且是标题，丢弃，只保留新来的content
+                                            pass 
                                     else:
-                                        self.txt_content.insert("end", current_section_text + content)
-                                    current_section_text = "SAFE" 
-                                else:
-                                    self.txt_content.insert("end", content)
+                                        # 没有重复，安全上屏
+                                        self.txt_content.insert("end", current_section_text)
+                                    
+                                    current_section_text = "SAFE" # 标记为安全
+                                
+                                # 直接输出新内容
+                                self.txt_content.insert("end", content)
                         
                         self.txt_content.see("end")
                         if len(temp_text) > 50: last_paragraph = temp_text
+                
+                # 循环结束，检查缓冲区是否还有未上屏的内容
+                if current_section_text != "SAFE" and len(current_section_text) > 0:
+                     # 同样的检查逻辑
+                    similarity = difflib.SequenceMatcher(None, header_core, get_core_text(current_section_text)).ratio()
+                    if similarity > 0.6 or header_core in get_core_text(current_section_text):
+                        parts = current_section_text.split('\n', 1)
+                        if len(parts) > 1: self.txt_content.insert("end", parts[1])
+                    else:
+                        self.txt_content.insert("end", current_section_text)
 
             if not self.stop_event.is_set():
                 self.status_label.configure(text="撰写完成！", text_color="green")
@@ -553,6 +585,7 @@ class MasterWriterApp(ctk.CTk):
         finally:
             self.btn_run_write.configure(state="normal")
 
+    # --- 核心升级：导出 Word (智能清洗 Markdown) ---
     def save_to_word(self):
         content = self.txt_content.get("0.0", "end").strip()
         if not content: return
@@ -585,6 +618,7 @@ class MasterWriterApp(ctk.CTk):
                 line = line.strip()
                 if not line: continue
 
+                # 识别系统插入的章节标记
                 if line.startswith("【") and line.endswith("】"):
                     header = line.replace("【", "").replace("】", "")
                     
@@ -606,10 +640,15 @@ class MasterWriterApp(ctk.CTk):
                         p = doc.add_paragraph(header)
                         p.runs[0].bold = True
                 else:
-                    # 去除 Markdown 痕迹
+                    # 智能清洗 Markdown 痕迹
                     clean_line = line
+                    
+                    # 1. 加粗处理：**加粗** -> 去掉星号，应用加粗样式 (简化版：直接去星号，避免复杂解析)
                     clean_line = re.sub(r'\*\*(.*?)\*\*', r'\1', clean_line) 
+                    # 2. 标题处理：### 标题 -> 去掉井号
                     clean_line = re.sub(r'#{1,6}\s?', '', clean_line)
+                    # 3. 列表处理：- 列表 -> 列表
+                    if clean_line.startswith("- "): clean_line = clean_line[2:]
                     
                     p = doc.add_paragraph(clean_line)
                     p.paragraph_format.first_line_indent = Pt(24) 
