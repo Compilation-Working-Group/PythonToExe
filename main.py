@@ -12,7 +12,7 @@ import time
 import re
 
 # --- 配置区域 ---
-APP_VERSION = "v14.0.0 (Universal Custom Mode)"
+APP_VERSION = "v14.0.1 (Linux Fix)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
 # ----------------
@@ -21,7 +21,6 @@ ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
 # === 动态预设库 ===
-# 新增了“自由定制”模式
 PRESET_CONFIGS = {
     "自由定制 / 其它文稿": {
         "topic": "（在此输入任何文稿的主题，如：国旗下讲话、新闻通稿、申报材料）",
@@ -64,7 +63,7 @@ PRESET_CONFIGS = {
 class UniversalWriterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"全能写作助手 (支持任意文体) - {DEV_NAME}")
+        self.title(f"全能写作助手 (修复版) - {DEV_NAME}")
         self.geometry("1200x900")
         
         self.grid_columnconfigure(0, weight=1)
@@ -102,7 +101,6 @@ class UniversalWriterApp(ctk.CTk):
 
         # 1. 文体选择
         ctk.CTkLabel(t, text="文体类型:", font=("Microsoft YaHei UI", 12, "bold")).grid(row=0, column=0, padx=10, pady=10, sticky="e")
-        # 将“自由定制”放在第一个
         modes = list(PRESET_CONFIGS.keys())
         self.combo_mode = ctk.CTkComboBox(t, values=modes, width=250, command=self.on_mode_change)
         self.combo_mode.set("自由定制 / 其它文稿")
@@ -214,7 +212,7 @@ class UniversalWriterApp(ctk.CTk):
             return None
         return OpenAI(api_key=key, base_url=base)
 
-    # --- 任务：生成大纲 (支持自由指令) ---
+    # --- 任务：生成大纲 ---
     def run_gen_outline(self):
         self.stop_event.clear()
         topic = self.entry_topic.get().strip()
@@ -234,9 +232,7 @@ class UniversalWriterApp(ctk.CTk):
         self.btn_gen_outline.configure(state="disabled", text="规划中...")
         self.status_label.configure(text=f"正在根据您的指令规划【{mode}】结构...", text_color="#1F6AA5")
         
-        # 智能结构生成逻辑
         if "自由定制" in mode:
-            # 自由模式：完全听用户指令
             prompt = f"""
             你是一位专业文秘。请根据用户要求，设计一份文稿大纲。
             文章主题：{topic}
@@ -248,7 +244,6 @@ class UniversalWriterApp(ctk.CTk):
             3. 直接输出标题，不要 Markdown 符号。
             """
         elif "期刊论文" in mode:
-            # 论文模式：强制包含特定板块
             prompt = f"""
             请为高中化学论文《{topic}》设计大纲。
             【强制要求】：必须包含：摘要与关键词、一、引言；二、理论价值；三、教学策略；四、结语；参考文献。
@@ -256,7 +251,6 @@ class UniversalWriterApp(ctk.CTk):
             直接输出标题，无Markdown。
             """
         else:
-            # 其他预设模式（计划、总结、反思）：禁止摘要
             prompt = f"""
             请为《{topic}》设计一份【{mode}】大纲。
             【强制要求】：
@@ -434,6 +428,8 @@ class UniversalWriterApp(ctk.CTk):
         self.api_config["model"] = self.entry_model.get().strip()
         with open("config.json", "w") as f: json.dump(self.api_config, f)
 
+# === 修正的核心 ===
 if __name__ == "__main__":
-    app = InteractiveWriterApp()
+    # 使用正确的类名进行实例化
+    app = UniversalWriterApp()
     app.mainloop()
