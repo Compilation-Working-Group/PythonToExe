@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import json
 import time
 import re
-import difflib # 新增：用于模糊匹配去重
+import difflib 
 
 # --- 依赖库检测 ---
 try:
@@ -34,9 +34,10 @@ if sys.platform.startswith('linux'):
             os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v32.0.0 (Smart Clean + Excel Filter)"
+APP_VERSION = "v33.0.0 (Pro: Help & About Added)"
 DEV_NAME = "俞晋全"
 DEV_ORG = "俞晋全高中化学名师工作室"
+COPYRIGHT = "© 2026 Yu Jinquan Chemistry Studio. All Rights Reserved."
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -110,16 +111,74 @@ class MasterWriterApp(ctk.CTk):
         
         self.tab_write = self.tabview.add("写作工作台")
         self.tab_settings = self.tabview.add("系统设置")
+        self.tab_about = self.tabview.add("帮助与关于") # 新增页面
 
         self.setup_write_tab()
         self.setup_settings_tab()
+        self.setup_about_tab() # 加载关于页面
+
+    # --- 新增：帮助与关于页面 ---
+    def setup_about_tab(self):
+        t = self.tab_about
+        t.grid_columnconfigure(0, weight=1)
+        
+        # 开发者信息区
+        dev_frame = ctk.CTkFrame(t, fg_color="transparent")
+        dev_frame.pack(pady=20, fill="x", padx=20)
+        
+        ctk.CTkLabel(dev_frame, text=APP_VERSION, font=("Arial", 20, "bold"), text_color="#1F6AA5").pack()
+        ctk.CTkLabel(dev_frame, text=f"开发者: {DEV_NAME}", font=("Microsoft YaHei UI", 16, "bold")).pack(pady=(10, 0))
+        ctk.CTkLabel(dev_frame, text=DEV_ORG, font=("Microsoft YaHei UI", 14)).pack()
+        ctk.CTkLabel(dev_frame, text=COPYRIGHT, font=("Arial", 10), text_color="gray").pack(pady=5)
+        
+        ctk.CTkFrame(t, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10)
+
+        # 使用说明书
+        guide_text = """【软件使用说明书】
+
+一、 系统配置（首次使用必做）
+1. 点击“系统设置”选项卡。
+2. 输入您的 API Key、Base URL 和 模型名称（推荐 deepseek-chat）。
+3. 点击“保存配置”，系统会自动记住您的设置。
+
+二、 写作流程
+第1步：选择文体与资料
+   - 在顶部下拉框选择文体（如“期刊论文”）。系统会自动填入推荐的标题和指令。
+   - 【核心功能】点击“📂 上传/筛选资料”按钮，投喂参考文档。
+     * 支持 Word(.docx)、PDF、Excel(.xlsx)、文本(.txt)等。
+     * 上传 Excel 时，系统会弹窗询问是否筛选特定关键词（如“高二1班”），以此过滤无关数据，提高分析精准度。
+
+第2步：生成大纲
+   - 确认标题和指令无误后，点击左下角的“生成/重置大纲”。
+   - AI 会阅读您的题目和参考资料，设计出量身定制的结构。
+   - 您可以在左侧文本框中手动修改大纲（例如增删章节）。
+
+第3步：撰写全文
+   - 点击“开始撰写全文”。
+   - 右侧窗口会实时显示 AI 的撰写过程。
+   - 系统内置了“智能去重”和“防复读”机制，确保文章流畅自然。
+
+第4步：导出成果
+   - 撰写完成后，点击右下角的“导出 Word”。
+   - 系统会自动清洗 Markdown 符号（如 **加粗**），生成纯净的 Word 文档。
+
+三、 常见问题
+   - 如果 AI 写偏了：请检查“具体指令”是否清晰，或者点击“❌ 清除”参考资料后重试。
+   - 如果上传 Excel 报错：请确保 Excel 没有加密，且格式标准。
+   - 导出 Word 乱码：通常不会发生，系统已内置 UTF-8 编码处理。
+
+祝您写作愉快！
+"""
+        txt_guide = ctk.CTkTextbox(t, font=("Microsoft YaHei UI", 13), height=400)
+        txt_guide.pack(fill="both", expand=True, padx=20, pady=10)
+        txt_guide.insert("0.0", guide_text)
+        txt_guide.configure(state="disabled") # 只读模式
 
     def setup_write_tab(self):
         t = self.tab_write
         t.grid_columnconfigure(1, weight=1)
         t.grid_rowconfigure(6, weight=1) 
 
-        # 顶部控制区
         ctrl_frame = ctk.CTkFrame(t, fg_color="transparent")
         ctrl_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
         
@@ -181,7 +240,7 @@ class MasterWriterApp(ctk.CTk):
         # 右侧正文
         content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         content_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (自动清洗重复标题)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
+        ctk.CTkLabel(content_frame, text="Step 2: 正文撰写 (自动清洗)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
         self.status_label = ctk.CTkLabel(content_frame, text="就绪", text_color="gray")
         self.status_label.pack(side="right")
 
@@ -257,13 +316,13 @@ class MasterWriterApp(ctk.CTk):
                     
                     # 永远保留表头
                     header = rows[0]
-                    # 转CSV格式，更利于AI理解
+                    # 转CSV格式
                     sheet_data.append(",".join([str(c) if c else "" for c in header]))
                     
                     match_count = 0
                     for row in rows[1:]:
                         row_str = ",".join([str(c) if c else "" for c in row])
-                        # 核心筛选逻辑：如果没有关键词，或者关键词在行内，则保留
+                        # 核心筛选逻辑
                         if not filter_key or (filter_key in row_str):
                             sheet_data.append(row_str)
                             match_count += 1
@@ -361,7 +420,7 @@ class MasterWriterApp(ctk.CTk):
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
         ref_hint = ""
         if self.reference_content:
-            ref_hint = f"【资料背景】：用户提供了数据/资料（{len(self.reference_content)}字），请务必在构建大纲时，安排章节来分析这些数据。"
+            ref_hint = f"【资料背景】：用户提供了数据/资料（{len(self.reference_content)}字），请务必在构建大纲时安排章节来分析这些数据。"
 
         prompt = f"""
         任务：为《{topic}》写一份【{mode}】的详细大纲。
@@ -643,7 +702,7 @@ class MasterWriterApp(ctk.CTk):
                     # 智能清洗 Markdown 痕迹
                     clean_line = line
                     
-                    # 1. 加粗处理：**加粗** -> 去掉星号，应用加粗样式 (简化版：直接去星号，避免复杂解析)
+                    # 1. 加粗处理：**加粗** -> 去掉星号
                     clean_line = re.sub(r'\*\*(.*?)\*\*', r'\1', clean_line) 
                     # 2. 标题处理：### 标题 -> 去掉井号
                     clean_line = re.sub(r'#{1,6}\s?', '', clean_line)
