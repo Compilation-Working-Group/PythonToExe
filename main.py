@@ -12,16 +12,25 @@ import json
 import time
 import re
 
-# --- Linux 显示修正 ---
+# --- Linux 终极防闪退补丁 ---
+# 在 Ubuntu 上，如果没检测到显示器，程序会直接自杀。
+# 这段代码强制给它一个显示环境，或者在终端报错而不是静默退出。
 if sys.platform.startswith('linux'):
-    if os.environ.get('DISPLAY','') == '':
-        print('Warning: No DISPLAY environment variable. Setting to :0')
-        os.environ.__setitem__('DISPLAY', ':0')
+    try:
+        # 尝试连接 X11
+        import tkinter
+        root = tkinter.Tk()
+        root.destroy()
+    except Exception as e:
+        # 如果连接失败，尝试设置变量（针对 Wayland/X11 兼容性）
+        print(f"Display init warning: {e}")
+        if os.environ.get('DISPLAY','') == '':
+            os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v21.0.2 (Linux Fix)"
+APP_VERSION = "v25.0.0 (Ubuntu 24.04 Ready)"
 DEV_NAME = "俞晋全"
-DEV_ORG = "甘肃省金塔县中学，甘肃金塔 735300"
+DEV_ORG = "俞晋全高中化学名师工作室"
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -30,31 +39,49 @@ ctk.set_default_color_theme("blue")
 STYLE_GUIDE = {
     "期刊论文": {
         "desc": "参照《虚拟仿真》、《热重分析》等范文。学术严谨，理实结合。",
+        "default_topic": "高中化学虚拟仿真实验教学的价值与策略研究",
+        "default_words": "3000",
+        "default_instruction": "要求：\n1. 语气严谨学术，多用数据支撑。\n2. 策略部分必须结合具体的《氯气》或《氧化还原》实验案例。\n3. 摘要要写成连贯的短文，不要列条目。",
         "outline_prompt": "请设计一份标准的教育期刊论文大纲。必须包含：摘要、关键词、一、问题的提出；二、核心概念/理论；三、教学策略/模型建构（核心）；四、成效与反思；参考文献。",
         "writing_prompt": "语气要学术、客观。策略部分必须结合具体的化学知识点（如氯气、氧化还原）。多用数据和案例支撑。",
     },
     "教学反思": {
         "desc": "参照《二轮复习反思》。第一人称，深度剖析。",
+        "default_topic": "高三化学二轮复习课后的深刻反思",
+        "default_words": "2000",
+        "default_instruction": "要求：\n1. 使用第一人称‘我’。\n2. 拒绝套话，重点描写课堂上真实的遗憾、突发状况和学生的真实反应。\n3. 剖析要深刻，多找自身原因。",
         "outline_prompt": "请设计一份深度教学反思大纲。建议结构：一、教学初衷；二、课堂实录与问题；三、原因深度剖析；四、改进措施。",
         "writing_prompt": "使用第一人称‘我’。拒绝套话，重点描写课堂上真实的遗憾、突发状况和学生的真实反应。剖析要深刻。",
     },
     "教学案例": {
         "desc": "叙事风格，还原课堂现场。",
+        "default_topic": "《钠与水反应》教学案例分析",
+        "default_words": "2500",
+        "default_instruction": "要求：\n1. 采用‘叙事研究’风格。\n2. 像写故事一样描述课堂冲突、师生对话和实验现象。\n3. 重点突出“意外生成”的处理。",
         "outline_prompt": "请设计一份教学案例大纲。建议结构：一、案例背景；二、情境描述（片段）；三、案例分析；四、教学启示。",
         "writing_prompt": "采用‘叙事研究’风格。像写故事一样描述课堂冲突、师生对话和实验现象。",
     },
     "工作计划": {
         "desc": "行政公文风格，条理清晰。",
+        "default_topic": "2026年春季学期高二化学备课组工作计划",
+        "default_words": "2000",
+        "default_instruction": "要求：\n1. 语言简练，行政公文风。\n2. 措施要具体，多用数据（如周课时、目标分）。\n3. 包含具体的行事历。",
         "outline_prompt": "请设计一份工作计划大纲。包含：指导思想、工作目标、主要措施、行事历。",
         "writing_prompt": "语言简练，多用‘一要...二要...’的句式。措施要具体，多用数据。",
     },
     "工作总结": {
         "desc": "汇报风格，数据详实。",
+        "default_topic": "2025年度个人教学工作总结",
+        "default_words": "3000",
+        "default_instruction": "要求：\n1. 用数据说话（平均分、获奖数）。\n2. 既要展示亮点，也要诚恳分析不足。\n3. 结构严谨。",
         "outline_prompt": "请设计一份工作总结大纲。包含：工作概况、主要成绩、存在不足、未来展望。",
         "writing_prompt": "用数据说话（平均分、获奖数）。既要展示亮点，也要诚恳分析不足。",
     },
     "自由定制": {
         "desc": "根据指令自动生成。",
+        "default_topic": "（在此输入自定义文稿主题）",
+        "default_words": "1000",
+        "default_instruction": "请详细描述您的写作要求...",
         "outline_prompt": "请根据用户的具体指令设计最合理的大纲结构。",
         "writing_prompt": "严格遵循用户的特殊要求。",
     }
@@ -176,18 +203,13 @@ class MasterWriterApp(ctk.CTk):
         ctk.CTkButton(t, text="保存配置", command=self.save_config).pack(pady=20)
 
     def on_mode_change(self, choice):
-        if choice == "期刊论文":
-            self.entry_topic.delete(0, "end")
-            self.entry_topic.insert(0, "高中化学虚拟仿真实验教学的价值与策略研究")
-            self.txt_instructions.delete("0.0", "end")
-            self.txt_instructions.insert("0.0", "参照《氯气》和《热重》范文风格。内容要扎实，多举例。")
-            self.entry_words.delete(0, "end")
-            self.entry_words.insert(0, "3000")
-        elif choice == "教学反思":
-            self.entry_topic.delete(0, "end")
-            self.entry_topic.insert(0, "高三化学二轮复习课后的深刻反思")
-            self.entry_words.delete(0, "end")
-            self.entry_words.insert(0, "2000")
+        config = STYLE_GUIDE.get(choice, STYLE_GUIDE["自由定制"])
+        self.entry_topic.delete(0, "end")
+        self.entry_topic.insert(0, config.get("default_topic", ""))
+        self.txt_instructions.delete("0.0", "end")
+        self.txt_instructions.insert("0.0", config.get("default_instruction", ""))
+        self.entry_words.delete(0, "end")
+        self.entry_words.insert(0, config.get("default_words", "3000"))
         self.txt_outline.delete("0.0", "end")
         self.txt_outline.insert("0.0", f"（请点击“生成大纲”按钮，AI将为您规划【{choice}】的结构...）")
 
@@ -264,8 +286,6 @@ class MasterWriterApp(ctk.CTk):
             return
             
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
-        
-        # 智能滤除标题行
         if len(lines) > 0:
             first_line = lines[0]
             topic = self.entry_topic.get().strip()
@@ -355,6 +375,7 @@ class MasterWriterApp(ctk.CTk):
                 2. 严禁Markdown格式。
                 3. 内容务实，拒绝空洞套话。
                 4. {prompt_suffix}
+                5. 严格执行字数限制，不要大幅超写或少写。
                 """
                 
                 user_prompt = f"""
@@ -371,26 +392,45 @@ class MasterWriterApp(ctk.CTk):
                 resp = client.chat.completions.create(
                     model=self.api_config.get("model"),
                     messages=[{"role":"system","content":sys_prompt}, {"role":"user","content":user_prompt}],
-                    temperature=0.7
+                    temperature=0.7,
+                    stream=True
                 )
                 
-                raw = resp.choices[0].message.content
-                clean_text = raw.strip()
-                
-                if "摘要" in header:
-                    clean_text = re.sub(r'^【?摘要】?[:：]?\s*', '', clean_text)
-                else:
-                    lines_content = clean_text.split('\n')
-                    if len(lines_content) > 0:
-                        header_core = re.sub(r'^[一二三四五六七八九十]+、', '', header)
-                        if header_core in lines_content[0]:
-                            clean_text = "\n".join(lines_content[1:]).strip()
-
-                self.txt_content.insert("end", clean_text)
-                self.txt_content.see("end")
-                
-                if len(clean_text) > 50: last_paragraph = clean_text
-                time.sleep(0.5)
+                current_section_text = ""
+                for chunk in resp:
+                    if self.stop_event.is_set(): break
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        
+                        temp_text = current_section_text + content
+                        
+                        if "摘要" in header:
+                            if len(temp_text) < 10 and ("摘" in temp_text or "要" in temp_text):
+                                current_section_text += content
+                                continue 
+                            if temp_text.startswith("摘要：") or temp_text.startswith("【摘要】"):
+                                clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
+                                self.txt_content.insert("end", clean_chunk)
+                            else:
+                                self.txt_content.insert("end", content)
+                        else:
+                            header_core = re.sub(r'^[一二三四五六七八九十]+、', '', header)
+                            if len(temp_text) < 50 and (header_core in temp_text):
+                                current_section_text += content
+                            else:
+                                if len(current_section_text) > 0 and len(current_section_text) < 50:
+                                    if header_core in current_section_text:
+                                        parts = current_section_text.split('\n', 1)
+                                        if len(parts) > 1:
+                                            self.txt_content.insert("end", parts[1] + content)
+                                    else:
+                                        self.txt_content.insert("end", current_section_text + content)
+                                    current_section_text = "SAFE" 
+                                else:
+                                    self.txt_content.insert("end", content)
+                        
+                        self.txt_content.see("end")
+                        if len(temp_text) > 50: last_paragraph = temp_text
 
             if not self.stop_event.is_set():
                 self.status_label.configure(text="撰写完成！", text_color="green")
