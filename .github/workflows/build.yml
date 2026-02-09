@@ -24,7 +24,6 @@ jobs:
           python-version: "3.11"
 
       # ---- Linux: install runtime deps required by Qt xcb plugin ----
-      # Qt 6.5+ requires libxcb-cursor0 to load xcb platform plugin. [1](https://www.cnblogs.com/gccbuaa/p/19254097)[2](https://github.com/pyinstaller/pyinstaller/issues/5414)
       - name: Install Linux runtime deps for Qt (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -44,7 +43,6 @@ jobs:
           pip install pyinstaller
 
       # ---- Linux: add fcitx5 input method plugin into PySide6 ----
-      # PySide6 often lacks fcitx plugin; adding it enables Chinese input with fcitx5. [3](https://blog.csdn.net/gitblog_00511/article/details/148916652)[5](https://github.com/NotCookey/Pyinstaller-Github-Actions)
       - name: Detect PySide6 Qt plugins path (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -54,7 +52,8 @@ jobs:
 
       - name: Add fcitx5 Support to PySide6 (Linux)
         if: runner.os == 'Linux'
-        uses: chenmozhijin/fcitx5-pyside@master
+        # ✅ 修复点：不要用 @master。该仓库默认分支是 main 且有 v1.0.0 release。[1](https://github.com/chenmozhijin/fcitx5-pyside)[2](https://awesome.ecosyste.ms/api/v1/projects/github.com/chenmozhijin/fcitx5-pyside)
+        uses: chenmozhijin/fcitx5-pyside@v1.0.0
         with:
           plugins-path: ${{ env.PYSIDE_QT_PLUGINS }}
 
@@ -63,11 +62,10 @@ jobs:
         run: |
           rm -rf build dist || true
 
-          # Linux: use onedir (more robust for Qt plugin deployment). [7](https://blog.csdn.net/qq_48379015/article/details/153739176)
+          # Linux: use onedir (more robust for Qt plugin deployment)
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             pyinstaller --noconfirm --clean --onedir --name PaperWriter main.py
           else
-            # Windows/macOS: onefile + windowed
             pyinstaller --noconfirm --clean --onefile --windowed --name PaperWriter main.py
           fi
 
