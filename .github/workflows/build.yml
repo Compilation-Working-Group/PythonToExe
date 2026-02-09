@@ -25,13 +25,40 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 关键：Linux 环境下需要显式安装 Tkinter
+    # Linux 必须安装 tk 开发库才能编译成功
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y python3-tk
+      run: sudo apt-get update && sudo apt-get install -y python3-tk tcl-dev tk-dev
 
-    - name: Build with PyInstaller
+    # Windows 构建 (保持无黑框 --windowed)
+    - name: Build Windows
+      if: runner.os == 'Windows'
       shell: bash
+      run: |
+        pyinstaller --name="PaperAI" --onefile --windowed --clean \
+        --collect-all customtkinter \
+        --collect-all docx \
+        --collect-all openai \
+        --hidden-import=docx \
+        --hidden-import=openai \
+        main.py
+
+    # Linux 构建 (去掉 --windowed 以便调试报错)
+    # 注意：这里去掉了 --windowed，这样你在终端运行是能看到所有打印信息
+    - name: Build Linux
+      if: runner.os == 'Linux'
+      run: |
+        pyinstaller --name="PaperAI" --onefile --clean \
+        --collect-all customtkinter \
+        --collect-all docx \
+        --collect-all openai \
+        --hidden-import=docx \
+        --hidden-import=openai \
+        main.py
+
+    # macOS 构建 (保持无黑框)
+    - name: Build macOS
+      if: runner.os == 'macOS'
       run: |
         pyinstaller --name="PaperAI" --onefile --windowed --clean \
         --collect-all customtkinter \
@@ -46,8 +73,11 @@ jobs:
       run: |
         if [ "${{ matrix.os }}" == "windows-latest" ]; then
           mv dist/PaperAI.exe dist/PaperAI_Windows.exe
+        elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+           # macOS通常生成.app包，但onefile模式生成二进制，我们重命名它
+           mv dist/PaperAI dist/PaperAI_macOS
         else
-          mv dist/PaperAI dist/PaperAI_${{ matrix.os }}
+          mv dist/PaperAI dist/PaperAI_Linux
         fi
 
     - name: Upload Artifacts
