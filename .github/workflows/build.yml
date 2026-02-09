@@ -1,96 +1,71 @@
-name: Build Desktop App (Win/macOS/Linux)
+name: Build and Release
 
 on:
   push:
-    branches: [ "main" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-
     runs-on: ${{ matrix.os }}
-
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Linux runtime deps (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxcb-cursor0 \
-            libxcb-xinerama0 \
-            libxcb-icccm4 \
-            libxcb-keysyms1 \
-            libxcb-render-util0 \
-            libxkbcommon-x11-0
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Install fcitx5 Qt6 frontend (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fcitx5-frontend-qt6
-
-      - name: Patch PySide6 with fcitx5 plugin (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          # 1) 获取 PySide6 插件路径
-          PYSIDE_QT_PLUGINS="$(python -c 'import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), "Qt", "plugins"))')"
-          echo "PySide6 Qt plugins: $PYSIDE_QT_PLUGINS"
-          mkdir -p "$PYSIDE_QT_PLUGINS/platforminputcontexts"
-
-          # 2) 定位系统中的 fcitx5 插件
-          FCITX_SO="$(dpkg -L fcitx5-frontend-qt6 | grep -E 'libfcitx5platforminputcontextplugin\.so$' || true)"
-          if [[ -z "$FCITX_SO" ]]; then
-            FCITX_SO="$(find /usr -type f -name 'libfcitx5platforminputcontextplugin.so' 2>/dev/null | head -n 1 || true)"
-          fi
-
-          if [[ -z "$FCITX_SO" ]]; then
-            echo "ERROR: Cannot find fcitx5 plugin"
-            exit 1
-          fi
-
-          # 3) 拷贝插件
-          cp -v "$FCITX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
-
-      - name: Build with PyInstaller
-        shell: bash
-        run: |
-          rm -rf build dist || true
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            pyinstaller --noconfirm --clean --onedir --name PaperWriter main.py
-          else
-            pyinstaller --noconfirm --clean --onefile --windowed --name PaperWriter main.py
-          fi
-
-      - name: Self-test (Linux, offscreen)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          export QT_QPA_PLATFORM=offscreen
-          ./dist/PaperWriter/PaperWriter --selftest
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PaperWriter-${{ runner.os }}
-          path: dist/**
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create necessary directories
+      run: |
+        mkdir -p output
+        mkdir -p templates
+        mkdir -p config
+        mkdir -p assets
+    
+    - name: Build executable
+      run: |
+        python build_exe.py
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: AcademicWriterPro-${{ matrix.os }}-${{ matrix.python-version }}
+        path: |
+          dist/
+          output/
+          templates/
+          config/
+    
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+        generate_release_notes: true
