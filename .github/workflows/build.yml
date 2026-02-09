@@ -48,12 +48,14 @@ jobs:
       # ------------------------------------------------------------
       # Linux: enable Chinese input for Qt apps under fcitx5
       # Install fcitx5 Qt6 frontend plugin, then copy plugin into PySide6 Qt plugins
+      #
+      # (We avoid the previous action that tried to mkdir /platforminputcontexts and failed permission) [1](https://365edubluev9sschoolnz-my.sharepoint.com/personal/admin_icloud_edu_kg1/Documents/Microsoft%20Copilot%20Chat%20%E6%96%87%E4%BB%B6/7_Add%20fcitx5%20Support%20to%20PySide6%20(Linux).txt).txt).txt)
       # ------------------------------------------------------------
       - name: Install fcitx5 Qt6 frontend (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y fcitx5-frontend-qt6
+          sudo apt-get install -y fct install -y fcitx5-frontend-qt6
 
       - name: Patch PySide6 with fcitx5 plugin (Linux)
         if: runner.os == 'Linux'
@@ -61,17 +63,21 @@ jobs:
         run: |
           set -euxo pipefail
 
+          # 1) Find PySide6 Qt plugins path
           PYSIDE_QT_PLUGINS="$(python - <<'PY'
 import os, PySide6
 base = os.path.dirname(PySide6.__file__)
+printide6.__file__)
 print(os.path.join(base, "Qt", "plugins"))
 PY
 )"
           echo "PySide6 Qt plugins: $PYSIDE_QT_PLUGINS"
           mkdir -p "$PYSIDE_QT_PLUGINS/platforminputcontexts"
 
+          # 2) Locate fcitx5 Qt6 plugin .so from system package
           FCITX_SO="$(dpkg -L fcitx5-frontend-qt6 | grep -E 'libfcitx5platforminputcontextplugin\.so$' || true)"
           if [[ -z "$FCITX_SO" ]]; then
+then
             FCITX_SO="$(find /usr -type f -name 'libfcitx5platforminputcontextplugin.so' 2>/dev/null | head -n 1 || true)"
           fi
 
@@ -81,7 +87,7 @@ PY
           fi
 
           echo "Found fcitx5 plugin: $FCITX_SO"
-          cp -v "$FCITX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
+          cp -v "$FCITX_SO" "$PTX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
           ls -la "$PYSIDE_QT_PLUGINS/platforminputcontexts" | sed -n '1,200p'
 
       # -----------------------------
