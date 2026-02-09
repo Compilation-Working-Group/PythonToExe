@@ -12,78 +12,67 @@ import json
 import time
 import re
 
-# --- Linux 终极防闪退补丁 ---
-# 在 Ubuntu 上，如果没检测到显示器，程序会直接自杀。
-# 这段代码强制给它一个显示环境，或者在终端报错而不是静默退出。
+# --- Linux 显示环境自动修正 ---
 if sys.platform.startswith('linux'):
     try:
-        # 尝试连接 X11
         import tkinter
         root = tkinter.Tk()
         root.destroy()
-    except Exception as e:
-        # 如果连接失败，尝试设置变量（针对 Wayland/X11 兼容性）
-        print(f"Display init warning: {e}")
+    except:
         if os.environ.get('DISPLAY','') == '':
             os.environ.__setitem__('DISPLAY', ':0')
 
 # --- 配置区域 ---
-APP_VERSION = "v25.0.0 (Ubuntu 24.04 Ready)"
+APP_VERSION = "v27.0.0 (Dynamic Structure Adaptive)"
 DEV_NAME = "俞晋全"
-DEV_ORG = "俞晋全高中化学名师工作室"
+DEV_ORG = "甘肃省金塔县中学，甘肃金塔 735300"
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# === 文体风格定义 ===
+# === 文体风格定义 (已移除死板的结构模板，改为风格指导) ===
 STYLE_GUIDE = {
     "期刊论文": {
-        "desc": "参照《虚拟仿真》、《热重分析》等范文。学术严谨，理实结合。",
+        "desc": "学术严谨，理实结合，适合发表。",
         "default_topic": "高中化学虚拟仿真实验教学的价值与策略研究",
         "default_words": "3000",
-        "default_instruction": "要求：\n1. 语气严谨学术，多用数据支撑。\n2. 策略部分必须结合具体的《氯气》或《氧化还原》实验案例。\n3. 摘要要写成连贯的短文，不要列条目。",
-        "outline_prompt": "请设计一份标准的教育期刊论文大纲。必须包含：摘要、关键词、一、问题的提出；二、核心概念/理论；三、教学策略/模型建构（核心）；四、成效与反思；参考文献。",
-        "writing_prompt": "语气要学术、客观。策略部分必须结合具体的化学知识点（如氯气、氧化还原）。多用数据和案例支撑。",
+        "default_instruction": "要求：\n1. 结合具体的化学教学案例（如氯气、钠、电化学等）。\n2. 数据详实，逻辑严密。\n3. 适合《化学教育》或《中学化学教学参考》风格。",
+        "writing_prompt": "语气学术、客观、务实。严禁堆砌空洞理论，必须用具体的化学知识点和教学片段来支撑观点。",
     },
     "教学反思": {
-        "desc": "参照《二轮复习反思》。第一人称，深度剖析。",
+        "desc": "第一人称，深度剖析，真诚走心。",
         "default_topic": "高三化学二轮复习课后的深刻反思",
         "default_words": "2000",
-        "default_instruction": "要求：\n1. 使用第一人称‘我’。\n2. 拒绝套话，重点描写课堂上真实的遗憾、突发状况和学生的真实反应。\n3. 剖析要深刻，多找自身原因。",
-        "outline_prompt": "请设计一份深度教学反思大纲。建议结构：一、教学初衷；二、课堂实录与问题；三、原因深度剖析；四、改进措施。",
-        "writing_prompt": "使用第一人称‘我’。拒绝套话，重点描写课堂上真实的遗憾、突发状况和学生的真实反应。剖析要深刻。",
+        "default_instruction": "要求：\n1. 必须使用第一人称‘我’。\n2. 重点复盘课堂上的‘遗憾点’和‘生成性问题’。\n3. 剖析原因要深刻，不要找客观理由。",
+        "writing_prompt": "使用第一人称。文风要诚恳、犀利。多描写课堂上的真实细节（如学生的错题、冷场的瞬间）。",
     },
     "教学案例": {
-        "desc": "叙事风格，还原课堂现场。",
+        "desc": "叙事风格，还原现场，生动具体。",
         "default_topic": "《钠与水反应》教学案例分析",
         "default_words": "2500",
-        "default_instruction": "要求：\n1. 采用‘叙事研究’风格。\n2. 像写故事一样描述课堂冲突、师生对话和实验现象。\n3. 重点突出“意外生成”的处理。",
-        "outline_prompt": "请设计一份教学案例大纲。建议结构：一、案例背景；二、情境描述（片段）；三、案例分析；四、教学启示。",
-        "writing_prompt": "采用‘叙事研究’风格。像写故事一样描述课堂冲突、师生对话和实验现象。",
+        "default_instruction": "要求：\n1. 采用‘教育叙事’手法，像讲故事一样记录课堂。\n2. 还原师生对话，描写实验现象。\n3. 突出‘意外’与‘机智化解’。",
+        "writing_prompt": "采用叙事风格。大量使用对话描写、动作描写。还原真实的课堂冲突和教学灵感。",
     },
     "工作计划": {
-        "desc": "行政公文风格，条理清晰。",
+        "desc": "行政公文，条理清晰，数据导向。",
         "default_topic": "2026年春季学期高二化学备课组工作计划",
         "default_words": "2000",
-        "default_instruction": "要求：\n1. 语言简练，行政公文风。\n2. 措施要具体，多用数据（如周课时、目标分）。\n3. 包含具体的行事历。",
-        "outline_prompt": "请设计一份工作计划大纲。包含：指导思想、工作目标、主要措施、行事历。",
-        "writing_prompt": "语言简练，多用‘一要...二要...’的句式。措施要具体，多用数据。",
+        "default_instruction": "要求：\n1. 语言简练，干脆利落。\n2. 包含具体的行事历（周次安排）。\n3. 目标要量化（如平均分、及格率）。",
+        "writing_prompt": "行政公文风格。多用‘一要...二要...’句式。内容必须具体可执行，包含时间节点。",
     },
     "工作总结": {
-        "desc": "汇报风格，数据详实。",
+        "desc": "汇报风格，亮点突出，分析透彻。",
         "default_topic": "2025年度个人教学工作总结",
         "default_words": "3000",
-        "default_instruction": "要求：\n1. 用数据说话（平均分、获奖数）。\n2. 既要展示亮点，也要诚恳分析不足。\n3. 结构严谨。",
-        "outline_prompt": "请设计一份工作总结大纲。包含：工作概况、主要成绩、存在不足、未来展望。",
-        "writing_prompt": "用数据说话（平均分、获奖数）。既要展示亮点，也要诚恳分析不足。",
+        "default_instruction": "要求：\n1. 用数据说话。\n2. 既要展示成绩，也要诚恳分析不足。\n3. 结构严谨，层次分明。",
+        "writing_prompt": "汇报风格。多用数据对比。对成绩要总结经验，对不足要分析原因并提出对策。",
     },
     "自由定制": {
-        "desc": "根据指令自动生成。",
-        "default_topic": "（在此输入自定义文稿主题）",
+        "desc": "完全根据指令生成。",
+        "default_topic": "（在此输入题目）",
         "default_words": "1000",
-        "default_instruction": "请详细描述您的写作要求...",
-        "outline_prompt": "请根据用户的具体指令设计最合理的大纲结构。",
-        "writing_prompt": "严格遵循用户的特殊要求。",
+        "default_instruction": "请详细描述您的要求...",
+        "writing_prompt": "严格遵循用户的特殊指令，风格不限。",
     }
 }
 
@@ -149,20 +138,20 @@ class MasterWriterApp(ctk.CTk):
 
         outline_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         outline_frame.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(outline_frame, text="Step 1: 生成并修改大纲", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
+        ctk.CTkLabel(outline_frame, text="Step 1: 生成智能大纲 (可修改)", text_color="#1F6AA5", font=("bold", 13)).pack(side="left")
         
         self.txt_outline = ctk.CTkTextbox(self.paned_frame, font=("Microsoft YaHei UI", 12)) 
         self.txt_outline.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         
         btn_o_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         btn_o_frame.grid(row=2, column=0, sticky="ew")
-        self.btn_gen_outline = ctk.CTkButton(btn_o_frame, text="生成/重置大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
+        self.btn_gen_outline = ctk.CTkButton(btn_o_frame, text="根据题目生成大纲", command=self.run_gen_outline, fg_color="#1F6AA5", width=120)
         self.btn_gen_outline.pack(side="left", padx=5)
         ctk.CTkButton(btn_o_frame, text="清空", command=lambda: self.txt_outline.delete("0.0", "end"), fg_color="gray", width=60).pack(side="right", padx=5)
 
         content_frame = ctk.CTkFrame(self.paned_frame, fg_color="transparent")
         content_frame.grid(row=0, column=1, sticky="ew")
-        ctk.CTkLabel(content_frame, text="Step 2: 按大纲撰写全文", text_color="#2CC985", font=("bold", 13)).pack(side="left")
+        ctk.CTkLabel(content_frame, text="Step 2: 撰写预览 (实时流式)", text_color="#2CC985", font=("bold", 13)).pack(side="left")
         self.status_label = ctk.CTkLabel(content_frame, text="就绪", text_color="gray")
         self.status_label.pack(side="right")
 
@@ -210,8 +199,9 @@ class MasterWriterApp(ctk.CTk):
         self.txt_instructions.insert("0.0", config.get("default_instruction", ""))
         self.entry_words.delete(0, "end")
         self.entry_words.insert(0, config.get("default_words", "3000"))
+        
         self.txt_outline.delete("0.0", "end")
-        self.txt_outline.insert("0.0", f"（请点击“生成大纲”按钮，AI将为您规划【{choice}】的结构...）")
+        self.txt_outline.insert("0.0", f"（已切换至【{choice}】模式，请点击“根据题目生成大纲”...）")
 
     def stop_writing(self):
         self.stop_event.set()
@@ -231,6 +221,7 @@ class MasterWriterApp(ctk.CTk):
             return None
         return OpenAI(api_key=key, base_url=base)
 
+    # --- 生成大纲 (核心修改：语义分析) ---
     def run_gen_outline(self):
         self.stop_event.clear()
         topic = self.entry_topic.get().strip()
@@ -245,20 +236,31 @@ class MasterWriterApp(ctk.CTk):
         client = self.get_client()
         if not client: return
         self.btn_gen_outline.configure(state="disabled")
-        self.status_label.configure(text="正在规划结构...", text_color="#1F6AA5")
+        self.status_label.configure(text="正在分析题目并构建大纲...", text_color="#1F6AA5")
         
+        # 获取风格，但不获取死板结构
         style_cfg = STYLE_GUIDE.get(mode, STYLE_GUIDE["自由定制"])
         
+        # 动态 Prompt
         prompt = f"""
-        任务：为《{topic}》写一份【{mode}】的详细大纲。
-        【参考风格】：{style_cfg['desc']}
-        【结构建议】：{style_cfg['outline_prompt']}
-        【用户指令】：{instr}
-        【要求】：
-        1. 必须包含一级标题（如一、二、三）和二级标题（如（一）（二））。
-        2. 不要包含Markdown符号。
-        3. 直接输出大纲，不要废话。
+        你是一位资深的高中化学教育专家。
+        
+        【任务】：请为《{topic}》这篇文章设计一份独特的、逻辑严密的大纲。
+        【文体类型】：{mode}
+        【风格参考】：{style_cfg['desc']}
+        【用户要求】：{instr}
+        
+        【重要指令 - 拒绝千篇一律】：
+        1. 请不要套用通用模板（如“一、背景；二、意义”）。
+        2. 请深入分析题目《{topic}》的具体的含义。
+           - 如果题目是实验研究，大纲要包含“实验设计、数据分析”。
+           - 如果题目是复习策略，大纲要包含“学情诊断、模型建构”。
+           - 如果题目是工作总结，大纲要包含具体的“成绩数据、反思改进”。
+        3. 必须包含一级标题（如一、二、三）和二级标题（如（一）（二））。
+        4. 不要包含Markdown符号。
+        5. 直接输出大纲内容，不要前言后语。
         """
+        
         try:
             resp = client.chat.completions.create(
                 model=self.api_config.get("model"),
@@ -272,12 +274,13 @@ class MasterWriterApp(ctk.CTk):
                     c = chunk.choices[0].delta.content
                     self.txt_outline.insert("end", c)
                     self.txt_outline.see("end")
-            self.status_label.configure(text="大纲已生成，请手动修改。", text_color="green")
+            self.status_label.configure(text="大纲已生成，请检查并修改。", text_color="green")
         except Exception as e:
             self.status_label.configure(text=f"API错误: {str(e)}", text_color="red")
         finally:
             self.btn_gen_outline.configure(state="normal")
 
+    # --- 撰写全文 ---
     def run_full_write(self):
         self.stop_event.clear()
         outline_raw = self.txt_outline.get("0.0", "end").strip()
@@ -286,6 +289,8 @@ class MasterWriterApp(ctk.CTk):
             return
             
         lines = [l.strip() for l in outline_raw.split('\n') if l.strip()]
+        
+        # 智能滤除标题行
         if len(lines) > 0:
             first_line = lines[0]
             topic = self.entry_topic.get().strip()
@@ -296,8 +301,11 @@ class MasterWriterApp(ctk.CTk):
         current_task = []
         for line in lines:
             is_header = False
+            # 兼容多种标题格式
             if re.match(r'^[一二三四五六七八九十]+、', line): is_header = True
+            if re.match(r'^第[一二三四五六七八九十]+部分', line): is_header = True
             if "摘要" in line or "参考文献" in line: is_header = True
+            
             if is_header:
                 if current_task: tasks.append(current_task)
                 current_task = [line]
@@ -306,7 +314,7 @@ class MasterWriterApp(ctk.CTk):
         if current_task: tasks.append(current_task)
 
         if not tasks:
-            self.status_label.configure(text="大纲格式无法识别", text_color="red")
+            self.status_label.configure(text="大纲格式无法识别（需包含'一、'或'摘要'）", text_color="red")
             return
 
         topic = self.entry_topic.get()
@@ -381,7 +389,8 @@ class MasterWriterApp(ctk.CTk):
                 user_prompt = f"""
                 题目：{topic}
                 当前章节：{header}
-                要点：{sub_points}
+                包含要点：
+                {sub_points}
                 
                 上下文：...{last_paragraph[-150:]}
                 
@@ -397,32 +406,34 @@ class MasterWriterApp(ctk.CTk):
                 )
                 
                 current_section_text = ""
+                
+                # 强力标题清洗
+                def get_core(text): return re.sub(r'[^\u4e00-\u9fa50-9]', '', text)
+
                 for chunk in resp:
                     if self.stop_event.is_set(): break
                     if chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
-                        
                         temp_text = current_section_text + content
                         
                         if "摘要" in header:
                             if len(temp_text) < 10 and ("摘" in temp_text or "要" in temp_text):
                                 current_section_text += content
                                 continue 
-                            if temp_text.startswith("摘要：") or temp_text.startswith("【摘要】"):
-                                clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
-                                self.txt_content.insert("end", clean_chunk)
-                            else:
-                                self.txt_content.insert("end", content)
+                            clean_chunk = re.sub(r'^【?摘要】?[:：]?\s*', '', content)
+                            self.txt_content.insert("end", clean_chunk)
                         else:
-                            header_core = re.sub(r'^[一二三四五六七八九十]+、', '', header)
-                            if len(temp_text) < 50 and (header_core in temp_text):
+                            header_core = get_core(header)
+                            if len(temp_text) < 50 and (header_core in get_core(temp_text)):
                                 current_section_text += content
                             else:
                                 if len(current_section_text) > 0 and len(current_section_text) < 50:
-                                    if header_core in current_section_text:
+                                    if header_core in get_core(current_section_text):
                                         parts = current_section_text.split('\n', 1)
                                         if len(parts) > 1:
                                             self.txt_content.insert("end", parts[1] + content)
+                                        else:
+                                            self.txt_content.insert("end", content)
                                     else:
                                         self.txt_content.insert("end", current_section_text + content)
                                     current_section_text = "SAFE" 
