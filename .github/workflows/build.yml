@@ -25,12 +25,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Linux下通常需要安装tk库
+    # 关键：Linux 环境下需要显式安装 Tkinter
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk
 
     - name: Build with PyInstaller
+      shell: bash
       run: |
         pyinstaller --name="PaperAI" --onefile --windowed --clean \
         --collect-all customtkinter \
