@@ -15,7 +15,7 @@ from docx.oxml import OxmlElement
 
 # --- 全局配置 ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v1.0.6 (Debug & Font Safe)"
+APP_VERSION = "v1.0.7 (Critical Fix)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
@@ -103,9 +103,13 @@ class GongWenFormatterApp(ctk.CTk):
         btn_box = ctk.CTkFrame(f, fg_color="transparent")
         btn_box.grid(row=0, column=0, sticky="ew", pady=10)
         
-        ctk.CTkButton(btn_box, text="📂 1. 上传文档", command=self.upload_files, width=180).pack(side="left", padx=10)
+        # --- 修复点：正确赋值给 self.btn_upload ---
+        self.btn_upload = ctk.CTkButton(btn_box, text="📂 1. 上传文档", command=self.upload_files, width=180)
+        self.btn_upload.pack(side="left", padx=10)
+        
         self.btn_process = ctk.CTkButton(btn_box, text="▶ 2. 开始排版", command=self.start_processing, width=180, fg_color="green", state="disabled")
         self.btn_process.pack(side="left", padx=10)
+        
         self.btn_export = ctk.CTkButton(btn_box, text="💾 3. 导出结果", command=self.export_files, width=180, state="disabled")
         self.btn_export.pack(side="left", padx=10)
 
@@ -160,12 +164,12 @@ class GongWenFormatterApp(ctk.CTk):
         self.frames[name].grid(row=0, column=0, sticky="nsew")
 
     def log(self, text):
-        print(f"[LOG] {text}") # 同时输出到终端，方便Linux调试
+        print(f"[LOG] {text}") 
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"{text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        self.update_idletasks() # 强制立刻刷新UI
+        self.update_idletasks() 
 
     def update_config(self):
         try:
@@ -190,6 +194,8 @@ class GongWenFormatterApp(ctk.CTk):
     # --- 流程控制 ---
     def start_processing(self):
         self.log(">>> 正在初始化排版引擎...")
+        
+        # 此时 self.btn_upload 已被正确定义，不会报错了
         self.btn_process.configure(state="disabled")
         self.btn_upload.configure(state="disabled")
         self.processed_docs = []
@@ -198,13 +204,10 @@ class GongWenFormatterApp(ctk.CTk):
         self.total_files = len(self.file_list)
         self.success_count = 0
         
-        # 强制刷新一次界面
         self.update()
-        # 延迟100ms启动，避免卡住按钮动画
         self.after(100, self.process_next_file)
 
     def process_next_file(self):
-        # 递归终止条件
         if not self.process_queue:
             self.on_process_finish(self.success_count)
             return
@@ -214,7 +217,7 @@ class GongWenFormatterApp(ctk.CTk):
         
         self.progressbar.set(index / self.total_files)
         self.log(f"正在读取: {filename} ...")
-        self.update() # 关键：每处理一步都刷新界面
+        self.update() 
 
         try:
             print(f"DEBUG: 开始处理 {file_path}")
@@ -224,12 +227,10 @@ class GongWenFormatterApp(ctk.CTk):
             self.log(f"✅ {filename} 排版成功")
         except Exception as e:
             error_msg = str(e)
-            print(f"ERROR: {traceback.format_exc()}") # 打印详细堆栈
+            print(f"ERROR: {traceback.format_exc()}")
             self.log(f"❌ {filename} 失败: {error_msg}")
-            # 弹窗提示，防止用户不知道发生了错误
-            messagebox.showerror("排版错误", f"文件：{filename}\n错误：{error_msg}\n\n建议：请检查文档是否被加密，或是否包含特殊对象。")
+            messagebox.showerror("排版错误", f"文件：{filename}\n错误：{error_msg}")
         
-        # 调度下一个，间隔50ms
         self.after(50, self.process_next_file)
 
     def on_process_finish(self, count):
@@ -279,7 +280,7 @@ class GongWenFormatterApp(ctk.CTk):
 
         cfg = self.config
 
-        # 2. 页面设置 (增加保护)
+        # 2. 页面设置
         try:
             for section in doc.sections:
                 section.top_margin = Cm(cfg["margins"]["top"])
@@ -291,29 +292,27 @@ class GongWenFormatterApp(ctk.CTk):
         except Exception as e:
             print(f"Warning: 页面设置失败 ({e})")
 
-        # 3. 基础样式设置 (在Linux上如果没有字体，这里可能会报错，所以要保护)
+        # 3. 基础样式设置
         try:
             style = doc.styles['Normal']
             style.font.name = 'Times New Roman'
             style.font.size = Pt(cfg["sizes"]["body"])
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
         except Exception as e:
-            print(f"Warning: 基础样式设置失败，可能是缺少字体 ({e})")
+            print(f"Warning: 基础样式设置失败 ({e})")
 
-        # 4. 遍历段落 (核心循环)
+        # 4. 遍历段落
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
-            # 尝试设置行距
             try:
                 paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
             except: pass
             
-            # 标题识别逻辑
             try:
-                # 简单判断大标题：第一段且居中或字少
+                # 简单判断大标题
                 if i == 0 and len(text) < 50:
                     self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
                     paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -348,7 +347,6 @@ class GongWenFormatterApp(ctk.CTk):
                 
             except Exception as e:
                 print(f"Warning: 段落 {i} 处理出错: {e}")
-                # 继续处理下一段，不要中断整个文档
 
         # 5. 表格处理
         for table in doc.tables:
@@ -375,7 +373,6 @@ class GongWenFormatterApp(ctk.CTk):
                 run.bold = bold
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
         except Exception:
-            # 如果出错（例如系统没有这个字体），静默失败，保留默认字体
             pass
 
     def add_page_number(self, paragraph):
