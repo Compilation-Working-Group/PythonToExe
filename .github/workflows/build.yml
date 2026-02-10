@@ -1,8 +1,6 @@
 name: Build GongWenFormatter
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -26,31 +24,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Linux 必须安装 tkinter 支持库
     - name: Install Tkinter (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk
 
-    # Windows 构建 (移除 add-data，修复找不到文件的错误)
     - name: Build Windows
       if: runner.os == 'Windows'
       shell: bash
       run: |
         pyinstaller --name="公文排版助手" --onefile --windowed --clean main.py
 
-    # Linux 构建
     - name: Build Linux
       if: runner.os == 'Linux'
       run: |
         pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed --clean main.py
 
-    # macOS 构建
     - name: Build macOS
       if: runner.os == 'macOS'
       run: |
         pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed --clean main.py
 
-    # 重命名输出文件以便区分 (可选，用于 Artifact 上传)
     - name: Rename Output
       shell: bash
       run: |
