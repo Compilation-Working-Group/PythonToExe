@@ -1,0 +1,82 @@
+name: Cleanup Workflow (Local)
+
+# 仅允许手动触发，防止意外运行
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # 用于删除 Releases 和 Tags
+  actions: write   # 用于删除 Workflow 运行记录
+
+jobs:
+  cleanup-everything:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # 1. 清理所有已经完成的工作流运行记录
+      # ----------------------------------------------------------------
+      - name: Delete all workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0       # 保留 0 天（即删除所有）
+          keep_minimum_runs: 0 # 保留 0 个记录
+
+      # ----------------------------------------------------------------
+      # 2. 清理所有 Releases 和 Tags
+      # ----------------------------------------------------------------
+      - name: Delete all Releases and Tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching list of releases..."
+          # 获取最多 1000 个 Release 的 tag 名称
+          releases=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+
+          if [ -z "$releases" ]; then
+            echo "No releases found to delete."
+          else
+            echo "Found releases. Deleting..."
+            for tag in $releases; do
+              echo "Deleting release and tag: $tag"
+              # --cleanup-tag 参数会在删除 Release 的同时删除对应的 Git Tag
+              gh release delete "$tag" --cleanup-tag -y || true
+            done
+            echo "All releases and tags deleted."
+          fi
+
+      # ----------------------------------------------------------------
+      # 3. [新增] 强制清理本地宿主机残留文件 (解决 Permission denied)
+      # ----------------------------------------------------------------
+      - name: Force Cleanup Local Cache & Workspace
+        run: |
+          echo "🧹 开始清理本地残留文件..."
+          
+          # 使用 sudo 强制删除由 Docker (Root) 创建的文件
+          # 这一步是解决 "权限不够" 报错的关键
+          
+          if [ -d "openwrt_cache" ]; then
+            echo "正在删除 openwrt_cache..."
+            sudo rm -rf openwrt_cache
+          fi
+          
+          if [ -d "release_files" ]; then
+             echo "正在删除 release_files..."
+             sudo rm -rf release_files
+          fi
+          
+          if [ -d "workspace" ]; then
+             echo "正在删除 workspace..."
+             sudo rm -rf workspace
+          fi
+          
+          if [ -d "ib" ]; then
+             echo "正在删除 ib (ImageBuilder目录)..."
+             sudo rm -rf ib
+          fi
+          
+          echo "✅ 本地文件清理完毕！"
