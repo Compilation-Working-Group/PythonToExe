@@ -19,19 +19,19 @@ AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
     "margins": {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6},
-    "line_spacing": 28,  # 固定值 28磅
+    "line_spacing": 28,
     "fonts": {
-        "title": "方正小标宋简体", # 大标题
-        "subtitle": "楷体_GB2312", # 副标题/署名
-        "h1": "黑体",             # 一级标题
-        "h2": "楷体_GB2312",      # 二级标题
-        "h3": "仿宋_GB2312",      # 三级标题
-        "body": "仿宋_GB2312"     # 正文
+        "title": "方正小标宋简体",
+        "subtitle": "楷体_GB2312", # 副标题通常用楷体
+        "h1": "黑体",
+        "h2": "楷体_GB2312",
+        "h3": "仿宋_GB2312",
+        "body": "仿宋_GB2312"
     },
     "sizes": {
-        "title": 22,   # 二号
-        "subtitle": 16,# 三号
-        "h1": 16,      # 三号
+        "title": 22, # 二号
+        "subtitle": 16, # 三号
+        "h1": 16,    # 三号
         "h2": 16,
         "h3": 16,
         "body": 16
@@ -153,7 +153,7 @@ class GongWenFormatterApp(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
         
-        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【v1.0.9 更新】\n1. 智能识别主副标题。\n2. 在“一、”出现前的行，自动居中且不缩进。\n3. 作者/单位行自动使用楷体。"
+        info = f"{APP_NAME}\n{APP_VERSION}\n{AUTHOR_INFO}\n\n【排版原理】\n程序会自动识别大标题、副标题、署名和正文。\n\n【识别规则】\n1. 大标题：第一行，字数少。\n2. 副标题：以——开头。\n3. 称谓（如‘尊敬的’）：强制识别为正文。\n\n【常见问题】\n如果排版无反应，请检查文档是否被加密。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word", width=600, height=500)
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -261,7 +261,7 @@ class GongWenFormatterApp(ctk.CTk):
             try: os.startfile(save_dir)
             except: pass
 
-    # --- 核心排版逻辑 (v1.0.9 智能版头识别) ---
+    # --- 核心排版逻辑 (智能标题识别) ---
     def format_document(self, file_path):
         if not os.path.exists(file_path): raise FileNotFoundError("文件不存在")
         try: doc = Document(file_path)
@@ -288,26 +288,16 @@ class GongWenFormatterApp(ctk.CTk):
             style._element.rPr.rFonts.set(qn('w:eastAsia'), cfg["fonts"]["body"])
         except Exception: pass
 
-        # --- 核心升级：智能探测“正文起始点” ---
-        # 寻找第一个 "一、" 出现的位置
-        body_start_index = len(doc.paragraphs) # 默认全是版头（如果没有正文）
-        for i, p in enumerate(doc.paragraphs):
-            text = p.text.strip()
-            if re.match(r"^[一二三四五六七八九十]+、", text):
-                body_start_index = i
-                break
-        
-        # 如果找不到“一、”，则假设第3段开始是正文（兜底策略）
-        if body_start_index == len(doc.paragraphs) and len(doc.paragraphs) > 3:
-            body_start_index = 2
-
         # 3. 遍历段落
+        # 增加一个标志位，标记是否已经进入正文区域
+        is_body_started = False
+
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if not text: continue
 
-            # 通用设置：固定行距 + 网格对齐
             try:
+                # 通用设置：固定行距 + 网格对齐 + 自动右缩进
                 paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 paragraph.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
                 paragraph.paragraph_format.space_before = Pt(0)
@@ -315,51 +305,62 @@ class GongWenFormatterApp(ctk.CTk):
                 self.set_paragraph_grid_props(paragraph)
             except: pass
             
-            # --- 智能分流逻辑 ---
             try:
-                # A. 版头区域 (Header Zone)
-                if i < body_start_index:
-                    # 第一行：大标题
-                    if i == 0:
-                        self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
-                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                        # 大标题下空一行
-                        try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"])
-                        except: pass
+                # --- 智能特征识别 ---
+                
+                # 特征1：显式正文标记（称谓、问候语）
+                # 只要遇到“尊敬的”、“各位”、“大家好”，直接判定为正文开始
+                if re.match(r"^(尊敬的|各位|亲爱的|大家好)", text):
+                    is_body_started = True
+
+                # 如果已经进入正文区域，或者是长段落，直接应用正文样式
+                if is_body_started or len(text) > 50:
+                    self.apply_body_style(paragraph, cfg)
+                    # 检查是否是各级标题 (即使在正文区也可能有标题)
+                    if re.match(r"^[一二三四五六七八九十]+、", text):
+                        self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
+                        self.set_indent_xml(paragraph, chars=2) # 一级标题也要缩进吗？公文通常不缩进或缩进2字符，按截图看来需要缩进
+                    elif re.match(r"^（[一二三四五六七八九十]+）", text):
+                        self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
+                        self.set_indent_xml(paragraph, chars=2)
+                    elif re.match(r"^\d+\.", text):
+                        self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
+                        self.set_indent_xml(paragraph, chars=2)
                     else:
-                        # 中间行：副标题/署名 (楷体，三号，居中，无缩进)
-                        self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
-                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                    
-                    # 关键：版头区域强制取消首行缩进
+                        # 纯正文
+                        self.apply_body_style(paragraph, cfg)
+                    continue
+
+                # --- 此时尚未进入正文，判断是否为版头标题 ---
+
+                # 特征2：副标题 (破折号开头)
+                if text.startswith("——") or text.startswith("--"):
+                    self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                     self.set_indent_xml(paragraph, chars=0)
                     continue
 
-                # B. 正文区域 (Body Zone)
-                # 一级标题 (一、)
-                if re.match(r"^[一二三四五六七八九十]+、", text):
-                    self.safe_set_font(paragraph, cfg["fonts"]["h1"], cfg["sizes"]["h1"], bold=False)
-                    # 标题通常不需要缩进，或特殊缩进，此处暂定不缩进
+                # 特征3：大标题 (通常是前几行，字数少，居中)
+                # 假设前3段内的短文本才可能是标题
+                if i < 3 and len(text) < 40 and not is_body_started:
+                    self.safe_set_font(paragraph, cfg["fonts"]["title"], cfg["sizes"]["title"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    self.set_indent_xml(paragraph, chars=0)
+                    # 标题下留一点空隙
+                    try: paragraph.paragraph_format.space_after = Pt(cfg["line_spacing"] * 0.5)
+                    except: pass
+                    continue
+                
+                # 特征4：署名/单位 (短文本，在正文前，居中)
+                if len(text) < 20 and not is_body_started:
+                    self.safe_set_font(paragraph, cfg["fonts"]["subtitle"], cfg["sizes"]["subtitle"], bold=False)
+                    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                     self.set_indent_xml(paragraph, chars=0)
                     continue
 
-                # 二级标题 (（一）)
-                if re.match(r"^（[一二三四五六七八九十]+）", text):
-                    self.safe_set_font(paragraph, cfg["fonts"]["h2"], cfg["sizes"]["h2"], bold=False)
-                    self.set_indent_xml(paragraph, chars=0)
-                    continue
-
-                # 三级标题 (1. )
-                if re.match(r"^\d+\.", text):
-                    self.safe_set_font(paragraph, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
-                    self.set_indent_xml(paragraph, chars=0)
-                    continue
-
-                # 普通正文
-                self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-                # 正文强制 2 字符缩进
-                self.set_indent_xml(paragraph, chars=2)
+                # 兜底：如果都不符合，默认为正文
+                is_body_started = True
+                self.apply_body_style(paragraph, cfg)
                 
             except Exception as e:
                 print(f"段落处理警告: {e}")
@@ -381,18 +382,21 @@ class GongWenFormatterApp(ctk.CTk):
 
         return doc
 
-    # --- XML 底层操作 ---
+    def apply_body_style(self, paragraph, cfg):
+        """ 应用标准正文样式 """
+        self.safe_set_font(paragraph, cfg["fonts"]["body"], cfg["sizes"]["body"])
+        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+        self.set_indent_xml(paragraph, chars=2) # 强制首行缩进2字符
+
     def set_indent_xml(self, paragraph, chars=2):
         """ 使用 OXML 设置精确的字符级缩进 """
         try:
             pPr = paragraph._p.get_or_add_pPr()
             ind = pPr.get_or_add_ind()
             if chars == 0:
-                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
                 if 'w:firstLineChars' in ind.attrib: del ind.attrib['w:firstLineChars']
-                if 'w:left' in ind.attrib: del ind.attrib['w:left']
+                if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
             else:
-                # 200 = 2.00 字符
                 ind.set(qn('w:firstLineChars'), str(int(chars * 100)))
                 if 'w:firstLine' in ind.attrib: del ind.attrib['w:firstLine']
         except Exception: pass
