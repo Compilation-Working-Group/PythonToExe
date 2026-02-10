@@ -10,7 +10,7 @@ import uuid
 import time
 from datetime import datetime
 import traceback
-import platform # 用于检测系统
+import platform
 
 # --- 基础库 ---
 try:
@@ -35,7 +35,7 @@ except ImportError:
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.5.1 (Linux Stable)"
+APP_VERSION = "v2.5.2 (Fix Empty Bubble)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -52,9 +52,7 @@ COLOR_AI_BUBBLE = ("#FFFFFF", "#2B2B2B")
 COLOR_BG = ("#F2F2F2", "#1a1a1a")
 COLOR_SIDEBAR = ("#EBEBEB", "#212121")
 
-# --- Linux 稳定性关键修复 ---
-# 在 Linux (X11) 上，自动 DPI 缩放有时会导致 X_CreatePixmap 0x0 崩溃
-# 强制关闭自动缩放，由用户系统接管，提高稳定性
+# Linux 稳定性: 关闭自动 DPI 缩放防止崩溃
 if platform.system() == "Linux":
     ctk.deactivate_automatic_dpi_awareness()
 
@@ -112,16 +110,18 @@ class ChatBubble(ctk.CTkFrame):
         self.content_frame = ctk.CTkFrame(self.bubble_inner, fg_color="transparent")
         self.content_frame.pack(fill="both", padx=10, pady=10)
 
-        # 渲染内容
+        # 字体修复：Linux下使用 Arial 以防 Microsoft YaHei UI 缺失导致文字不可见
+        self.main_font = ("Arial", 14) 
+
         if self.is_streaming:
             self.stream_widget = ctk.CTkTextbox(
                 self.content_frame, 
-                font=("Microsoft YaHei UI", 14), 
+                font=self.main_font, 
                 text_color=self.text_color_val,
                 fg_color="transparent", 
                 wrap="word",
-                height=40, # 给定初始高度，防止 0x0 崩溃
-                width=300  # 给定初始宽度
+                height=40, 
+                width=300
             )
             self.stream_widget.pack(fill="both", expand=True)
             self.stream_widget.insert("0.0", self.prefix + text)
@@ -129,7 +129,6 @@ class ChatBubble(ctk.CTkFrame):
         else:
             self.render_final_content(self.prefix + text)
 
-        # 底部栏
         self.bottom_bar = ctk.CTkFrame(self.bubble_inner, fg_color="transparent", height=20)
         self.bottom_bar.pack(fill="x", padx=10, pady=(0, 5))
         
@@ -186,7 +185,8 @@ class ChatBubble(ctk.CTkFrame):
                 f = ctk.CTkFrame(self.content_frame, fg_color="#1E1E1E", corner_radius=5)
                 f.pack(fill="x", pady=5)
                 
-                t = ctk.CTkTextbox(f, font=("Consolas", 12), text_color="#D4D4D4", fg_color="transparent", 
+                # 代码字体使用 Courier 或 Consolas
+                t = ctk.CTkTextbox(f, font=("Courier", 12), text_color="#D4D4D4", fg_color="transparent", 
                                    height=min(len(code.split('\n'))*20 + 20, 400), wrap="none")
                 t.insert("0.0", code)
                 t.configure(state="disabled")
@@ -205,7 +205,7 @@ class ChatBubble(ctk.CTkFrame):
             else:
                 if part:
                     ctk.CTkLabel(self.content_frame, text=part, text_color=self.text_color_val, justify="left", 
-                                 font=("Microsoft YaHei UI", 14), wraplength=600).pack(fill="x", anchor="w")
+                                 font=self.main_font, wraplength=600).pack(fill="x", anchor="w")
 
 class DeepSeekApp(ctk.CTk):
     def __init__(self):
@@ -220,7 +220,6 @@ class DeepSeekApp(ctk.CTk):
         self.config = self.load_json(self.config_path, DEFAULT_CONFIG)
         self.sessions = self.load_json(self.history_path, [])
         
-        # 数据完整性校验：防止空Session导致渲染崩溃
         if not self.sessions or not isinstance(self.sessions, list):
             self.create_new_session(save=False)
         else:
@@ -232,8 +231,6 @@ class DeepSeekApp(ctk.CTk):
         self.last_scroll_time = 0
 
         self.setup_ui()
-        
-        # 延迟加载历史记录，等待UI完全渲染，防止X11绘图过早
         self.after(200, self.load_current_session_ui)
         self.update_model_status_display()
         
@@ -242,12 +239,8 @@ class DeepSeekApp(ctk.CTk):
 
     def load_json(self, path, default):
         if os.path.exists(path):
-            try:
-                data = json.load(open(path, "r", encoding="utf-8"))
-                return data
-            except Exception:
-                print(f"Error loading {path}, using default.")
-                return default
+            try: return json.load(open(path, "r", encoding="utf-8"))
+            except: pass
         return default
 
     def save_config(self):
@@ -295,15 +288,13 @@ class DeepSeekApp(ctk.CTk):
         self.lbl_model_status = ctk.CTkLabel(self.status_frame, text="初始化中...", font=("Arial", 12), text_color="#3498DB")
         self.lbl_model_status.pack(pady=(0,5))
 
-        # 4. History Title
+        # 4. History
         ctk.CTkLabel(self.sidebar, text="历史记录", font=("Arial", 12), text_color="gray").grid(row=3, column=0, sticky="nw", padx=15, pady=(10,0))
-        
-        # 5. History List
         self.history_list = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
         self.history_list.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.render_history_list()
 
-        # 6. Settings
+        # 5. Settings
         setting_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#2B2B2B"), corner_radius=10)
         setting_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=20)
         
@@ -317,11 +308,11 @@ class DeepSeekApp(ctk.CTk):
         self.entry_key.pack(pady=5, padx=10, fill="x")
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 7. Clear Button
+        # 6. Clear
         self.btn_clear = ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history)
         self.btn_clear.grid(row=6, column=0, sticky="ew", padx=15, pady=10)
 
-        # === 右侧 ===
+        # === Right ===
         self.main_area = ctk.CTkFrame(self, fg_color=COLOR_BG)
         self.main_area.grid(row=0, column=1, sticky="nsew")
         self.main_area.grid_rowconfigure(0, weight=1)
@@ -337,7 +328,7 @@ class DeepSeekApp(ctk.CTk):
         self.attach_display = ctk.CTkScrollableFrame(input_frame, height=40, orientation="horizontal", fg_color="transparent")
         self.attach_display.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         
-        self.entry_msg = ctk.CTkTextbox(input_frame, height=80, font=("Microsoft YaHei UI", 14), fg_color="transparent", border_width=0)
+        self.entry_msg = ctk.CTkTextbox(input_frame, height=80, font=("Arial", 14), fg_color="transparent", border_width=0)
         self.entry_msg.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.entry_msg.bind("<Return>", self.on_enter_press)
 
@@ -459,12 +450,14 @@ class DeepSeekApp(ctk.CTk):
                 delta = chunk.choices[0].delta
                 
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    r1_text += delta.reasoning_content
+                    c = delta.reasoning_content # 修复变量定义
+                    r1_text += c
                     self.after(0, lambda b=get_r1(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
                 if hasattr(delta, 'content') and delta.content:
-                    ai_text += delta.content
+                    c = delta.content # 修复核心Bug: v2.5.1 此处漏掉了c的定义
+                    ai_text += c
                     self.after(0, lambda b=get_ai(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
@@ -479,7 +472,11 @@ class DeepSeekApp(ctk.CTk):
             self.is_running = False
             self.after(0, self.reset_ui)
             self.after(0, self.force_scroll_to_bottom)
+            # 结束后将流式文本框转为静态Markdown
+            self.after(0, lambda: bubble_ai.finish_stream() if bubble_ai else None)
+            self.after(0, lambda: bubble_r1.finish_stream() if bubble_r1 else None)
 
+    # ... (其余方法保持不变) ...
     def create_new_session(self, save=True):
         new_session = {"id": str(uuid.uuid4()), "title": "新对话", "time": datetime.now().strftime("%m-%d"), "messages": []}
         self.sessions.insert(0, new_session)
@@ -617,6 +614,5 @@ if __name__ == "__main__":
         app = DeepSeekApp()
         app.mainloop()
     except Exception as e:
-        # 如果崩溃，写入日志以便排查
         with open("crash_log.txt", "w") as f:
             f.write(traceback.format_exc())
