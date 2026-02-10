@@ -10,6 +10,7 @@ import uuid
 import time
 from datetime import datetime
 import traceback
+import platform # 用于检测系统
 
 # --- 基础库 ---
 try:
@@ -34,7 +35,7 @@ except ImportError:
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.5.0 (Typewriter Smooth)"
+APP_VERSION = "v2.5.1 (Linux Stable)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -50,6 +51,12 @@ COLOR_USER_BUBBLE = "#95EC69"
 COLOR_AI_BUBBLE = ("#FFFFFF", "#2B2B2B")
 COLOR_BG = ("#F2F2F2", "#1a1a1a")
 COLOR_SIDEBAR = ("#EBEBEB", "#212121")
+
+# --- Linux 稳定性关键修复 ---
+# 在 Linux (X11) 上，自动 DPI 缩放有时会导致 X_CreatePixmap 0x0 崩溃
+# 强制关闭自动缩放，由用户系统接管，提高稳定性
+if platform.system() == "Linux":
+    ctk.deactivate_automatic_dpi_awareness()
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -77,12 +84,11 @@ class ChatBubble(ctk.CTkFrame):
         self.role = role
         self.raw_text = text 
         self.is_reasoning = is_reasoning
-        self.is_streaming = is_streaming # 标记是否处于流式输出中
+        self.is_streaming = is_streaming
         
         self.grid_columnconfigure(0 if role == "user" else 1, weight=1)
         self.grid_columnconfigure(1 if role == "user" else 0, weight=0)
         
-        # 样式定义
         if role == "user":
             bubble_color = COLOR_USER_BUBBLE
             text_color = "black"
@@ -100,31 +106,27 @@ class ChatBubble(ctk.CTkFrame):
             self.text_color_val = ("black", "white")
             self.prefix = ""
 
-        # 气泡外壳
         self.bubble_inner = ctk.CTkFrame(self, fg_color=bubble_color, corner_radius=12)
         self.bubble_inner.grid(row=0, column=1 if role == "user" else 0, padx=10, pady=5, sticky=anchor)
 
-        # 内容容器
         self.content_frame = ctk.CTkFrame(self.bubble_inner, fg_color="transparent")
         self.content_frame.pack(fill="both", padx=10, pady=10)
 
-        # --- 核心：打字机模式 vs 渲染模式 ---
+        # 渲染内容
         if self.is_streaming:
-            # 1. 流式模式：创建一个纯文本框用于追加，此时不进行Markdown渲染，保证流畅不闪烁
             self.stream_widget = ctk.CTkTextbox(
                 self.content_frame, 
                 font=("Microsoft YaHei UI", 14), 
                 text_color=self.text_color_val,
                 fg_color="transparent", 
                 wrap="word",
-                height=40, # 初始高度
-                width=400
+                height=40, # 给定初始高度，防止 0x0 崩溃
+                width=300  # 给定初始宽度
             )
             self.stream_widget.pack(fill="both", expand=True)
             self.stream_widget.insert("0.0", self.prefix + text)
             self.stream_widget.configure(state="disabled")
         else:
-            # 2. 静态模式：直接渲染最终效果（含代码高亮）
             self.render_final_content(self.prefix + text)
 
         # 底部栏
@@ -141,26 +143,18 @@ class ChatBubble(ctk.CTkFrame):
             ctk.CTkLabel(self.bottom_bar, text=timestamp, font=("Arial", 10), text_color="gray").pack(side="left")
 
     def append_stream_text(self, delta_text):
-        """ 仅用于流式模式：向后追加文本（无闪烁） """
         if not self.is_streaming: return
-        
         self.raw_text += delta_text
         self.stream_widget.configure(state="normal")
         self.stream_widget.insert("end", delta_text)
         self.stream_widget.configure(state="disabled")
         self.stream_widget.see("end")
-        
-        # 动态调整高度 (防止文本框太小)
-        # 简单估算：每20个字符或换行符增加高度
-        # 这里为了性能，不做复杂计算，依靠外部容器自适应
 
     def finish_stream(self):
-        """ 结束流式：销毁文本框，转为渲染模式 """
         if not self.is_streaming: return
-        
         self.is_streaming = False
-        self.stream_widget.destroy() # 销毁临时文本框
-        self.render_final_content(self.prefix + self.raw_text) # 渲染最终 Markdown
+        self.stream_widget.destroy()
+        self.render_final_content(self.prefix + self.raw_text)
 
     def copy_content(self):
         try:
@@ -183,7 +177,6 @@ class ChatBubble(ctk.CTkFrame):
             self.btn_copy.configure(text="❌ 失败", text_color="red")
 
     def render_final_content(self, text):
-        """ 解析 Markdown 并显示 """
         parts = re.split(r'(```[\s\S]*?```)', text)
         for part in parts:
             if part.startswith("```") and part.endswith("```"):
@@ -227,7 +220,8 @@ class DeepSeekApp(ctk.CTk):
         self.config = self.load_json(self.config_path, DEFAULT_CONFIG)
         self.sessions = self.load_json(self.history_path, [])
         
-        if not self.sessions:
+        # 数据完整性校验：防止空Session导致渲染崩溃
+        if not self.sessions or not isinstance(self.sessions, list):
             self.create_new_session(save=False)
         else:
             self.current_session_index = 0
@@ -238,7 +232,9 @@ class DeepSeekApp(ctk.CTk):
         self.last_scroll_time = 0
 
         self.setup_ui()
-        self.load_current_session_ui()
+        
+        # 延迟加载历史记录，等待UI完全渲染，防止X11绘图过早
+        self.after(200, self.load_current_session_ui)
         self.update_model_status_display()
         
         if self.config["api_key"]:
@@ -246,8 +242,12 @@ class DeepSeekApp(ctk.CTk):
 
     def load_json(self, path, default):
         if os.path.exists(path):
-            try: return json.load(open(path, "r", encoding="utf-8"))
-            except: pass
+            try:
+                data = json.load(open(path, "r", encoding="utf-8"))
+                return data
+            except Exception:
+                print(f"Error loading {path}, using default.")
+                return default
         return default
 
     def save_config(self):
@@ -315,10 +315,9 @@ class DeepSeekApp(ctk.CTk):
         self.entry_key = ctk.CTkEntry(setting_frame, placeholder_text="API Key", show="*")
         self.entry_key.insert(0, self.config["api_key"])
         self.entry_key.pack(pady=5, padx=10, fill="x")
-        
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 7. Clear
+        # 7. Clear Button
         self.btn_clear = ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history)
         self.btn_clear.grid(row=6, column=0, sticky="ew", padx=15, pady=10)
 
@@ -375,7 +374,7 @@ class DeepSeekApp(ctk.CTk):
 
     def throttled_scroll_to_bottom(self):
         now = time.time()
-        if now - self.last_scroll_time > 0.05: # 50ms 刷新
+        if now - self.last_scroll_time > 0.05:
             self.chat_scroll.update_idletasks()
             try: self.chat_scroll._parent_canvas.yview_moveto(1.0)
             except: pass
@@ -441,55 +440,37 @@ class DeepSeekApp(ctk.CTk):
                 stream=True
             )
             
-            # --- 核心：流式逻辑 ---
             r1_text = ""
             ai_text = ""
             bubble_r1 = None
             bubble_ai = None
             
-            # 闭包 helper
             def get_r1():
                 nonlocal bubble_r1
-                if not bubble_r1: 
-                    # 初始化一个流式气泡
-                    bubble_r1 = self.add_bubble_ui("ai", "", is_reasoning=True, is_streaming=True)
+                if not bubble_r1: bubble_r1 = self.add_bubble_ui("ai", "", is_reasoning=True, is_streaming=True)
                 return bubble_r1
             def get_ai():
                 nonlocal bubble_ai
-                if not bubble_ai: 
-                    # 初始化一个流式气泡
-                    bubble_ai = self.add_bubble_ui("ai", "", is_streaming=True)
+                if not bubble_ai: bubble_ai = self.add_bubble_ui("ai", "", is_streaming=True)
                 return bubble_ai
 
             for chunk in response:
                 if not self.is_running: break
                 delta = chunk.choices[0].delta
                 
-                # 思考流
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    c = delta.reasoning_content
-                    r1_text += c
+                    r1_text += delta.reasoning_content
                     self.after(0, lambda b=get_r1(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
-                # 正文流
                 if hasattr(delta, 'content') and delta.content:
-                    c = delta.content
-                    ai_text += c
+                    ai_text += delta.content
                     self.after(0, lambda b=get_ai(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
-            # 流式结束：转换为渲染态
-            def finalize():
-                if bubble_r1: bubble_r1.finish_stream()
-                if bubble_ai: bubble_ai.finish_stream()
-                
-                # 保存
-                ts = datetime.now().strftime("%H:%M")
-                session["messages"].append({"role": "ai", "content": ai_text, "reasoning": r1_text, "timestamp": ts})
-                self.save_sessions()
-            
-            self.after(0, finalize)
+            ts = datetime.now().strftime("%H:%M")
+            session["messages"].append({"role": "ai", "content": ai_text, "reasoning": r1_text, "timestamp": ts})
+            self.save_sessions()
 
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("API Error", str(e)))
@@ -636,5 +617,6 @@ if __name__ == "__main__":
         app = DeepSeekApp()
         app.mainloop()
     except Exception as e:
+        # 如果崩溃，写入日志以便排查
         with open("crash_log.txt", "w") as f:
             f.write(traceback.format_exc())
