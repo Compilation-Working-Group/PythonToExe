@@ -35,7 +35,7 @@ except ImportError:
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.6.0 (Selectable & Scrollable)"
+APP_VERSION = "v2.6.1 (Right-Click Menu)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -65,6 +65,59 @@ def get_base_path():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
+# --- 右键菜单逻辑 ---
+class ContextMenu:
+    def __init__(self, widget, is_entry=False):
+        self.widget = widget
+        self.menu = tk.Menu(widget, tearoff=0, font=("Arial", 10))
+        
+        # 添加菜单项
+        self.menu.add_command(label="复制 (Copy)", command=self.copy_text)
+        if is_entry:
+            self.menu.add_command(label="粘贴 (Paste)", command=self.paste_text)
+            self.menu.add_command(label="剪切 (Cut)", command=self.cut_text)
+            self.menu.add_separator()
+            self.menu.add_command(label="清空 (Clear)", command=self.clear_text)
+
+        # 绑定右键事件 (Linux/Win: Button-3, Mac: Button-2 or Button-3)
+        widget.bind("<Button-3>", self.show_menu)
+        if platform.system() == "Darwin": # Mac兼容
+            widget.bind("<Button-2>", self.show_menu)
+
+    def show_menu(self, event):
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.menu.grab_release()
+
+    def copy_text(self):
+        try:
+            # 尝试获取选中的文本
+            text = self.widget.get("sel.first", "sel.last")
+            if text:
+                if pyperclip: pyperclip.copy(text)
+                else: 
+                    self.widget.clipboard_clear()
+                    self.widget.clipboard_append(text)
+        except tk.TclError:
+            pass # 没有选中内容
+
+    def paste_text(self):
+        try:
+            text = self.widget.clipboard_get()
+            self.widget.insert("insert", text)
+        except: pass
+
+    def cut_text(self):
+        try:
+            self.copy_text()
+            self.widget.delete("sel.first", "sel.last")
+        except: pass
+
+    def clear_text(self):
+        self.widget.delete("0.0", "end")
+
+
 class AttachmentChip(ctk.CTkFrame):
     def __init__(self, master, filename, command_delete, **kwargs):
         super().__init__(master, fg_color=("gray85", "gray30"), corner_radius=10, **kwargs)
@@ -83,7 +136,7 @@ class ChatBubble(ctk.CTkFrame):
         self.raw_text = text 
         self.is_reasoning = is_reasoning
         self.is_streaming = is_streaming
-        self.scroll_target = scroll_target # 传入父级滚动容器(chat_scroll)
+        self.scroll_target = scroll_target
         
         self.grid_columnconfigure(0 if role == "user" else 1, weight=1)
         self.grid_columnconfigure(1 if role == "user" else 0, weight=0)
@@ -105,18 +158,14 @@ class ChatBubble(ctk.CTkFrame):
             self.text_color_val = ("black", "white")
             self.prefix = ""
 
-        # 气泡外壳
         self.bubble_inner = ctk.CTkFrame(self, fg_color=bubble_color, corner_radius=12)
         self.bubble_inner.grid(row=0, column=1 if role == "user" else 0, padx=10, pady=5, sticky=anchor)
-        
-        # 绑定滚轮事件到外壳
         self.bind_scroll(self.bubble_inner)
 
         self.content_frame = ctk.CTkFrame(self.bubble_inner, fg_color="transparent")
         self.content_frame.pack(fill="both", padx=10, pady=10)
         self.bind_scroll(self.content_frame)
 
-        # 字体
         self.main_font = ("Arial", 14) 
         self.code_font = ("Courier", 12)
 
@@ -126,12 +175,11 @@ class ChatBubble(ctk.CTkFrame):
         else:
             self.render_final_content(self.prefix + text)
 
-        # 底部栏
         self.bottom_bar = ctk.CTkFrame(self.bubble_inner, fg_color="transparent", height=20)
         self.bottom_bar.pack(fill="x", padx=10, pady=(0, 5))
         self.bind_scroll(self.bottom_bar)
         
-        self.btn_copy = ctk.CTkButton(self.bottom_bar, text="📋 复制", width=50, height=20,
+        self.btn_copy = ctk.CTkButton(self.bottom_bar, text="📋 复制全文", width=60, height=20,
                                       fg_color="transparent", hover_color=("gray80", "gray40"),
                                       text_color="gray", font=("Arial", 10),
                                       command=self.copy_content)
@@ -143,20 +191,14 @@ class ChatBubble(ctk.CTkFrame):
             self.bind_scroll(ts_lbl)
 
     def bind_scroll(self, widget):
-        """ 核心修复：将滚轮事件透传给父级 ScrollableFrame """
         if not self.scroll_target: return
-        
-        # Linux (X11)
         widget.bind("<Button-4>", lambda e: self.scroll_target._parent_canvas.yview_scroll(-1, "units"))
         widget.bind("<Button-5>", lambda e: self.scroll_target._parent_canvas.yview_scroll(1, "units"))
-        # Windows/Mac
         widget.bind("<MouseWheel>", lambda e: self.scroll_target._parent_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
 
     def create_selectable_label(self, text, font, text_color):
-        """ 创建一个看起来像 Label 但可以选中的 Textbox """
-        # 计算大致高度：行数 * 行高 + 缓冲
         lines = text.count('\n') + (len(text) // 50) + 1
-        height = min(lines * 24 + 20, 600) # 限制最大高度
+        height = min(lines * 24 + 20, 600)
         
         tb = ctk.CTkTextbox(
             self.content_frame, 
@@ -166,13 +208,16 @@ class ChatBubble(ctk.CTkFrame):
             wrap="word",
             height=height, 
             width=400,
-            activate_scrollbars=False # 禁用内部滚动条，交由外部控制
+            activate_scrollbars=False
         )
         tb.insert("0.0", text)
-        tb.configure(state="disabled") # 只读
+        tb.configure(state="disabled")
         
         # 绑定滚动
         self.bind_scroll(tb)
+        # 绑定右键菜单 (核心修复)
+        ContextMenu(tb, is_entry=False)
+        
         return tb
 
     def append_stream_text(self, delta_text):
@@ -199,7 +244,7 @@ class ChatBubble(ctk.CTkFrame):
             else: self.fallback_copy(content)
 
             self.btn_copy.configure(text="✅ 成功", text_color="green")
-            self.after(1500, lambda: self.btn_copy.configure(text="📋 复制", text_color="gray"))
+            self.after(1500, lambda: self.btn_copy.configure(text="📋 复制全文", text_color="gray"))
         except:
             self.btn_copy.configure(text="❌ 失败", text_color="red")
 
@@ -219,13 +264,15 @@ class ChatBubble(ctk.CTkFrame):
                 f.pack(fill="x", pady=5)
                 self.bind_scroll(f)
                 
-                # 代码块 Textbox
                 t = ctk.CTkTextbox(f, font=self.code_font, text_color="#D4D4D4", fg_color="transparent", 
                                    height=min(len(code.split('\n'))*20 + 20, 400), wrap="none")
                 t.insert("0.0", code)
                 t.configure(state="disabled")
                 t.pack(fill="x", padx=5, pady=5)
                 self.bind_scroll(t)
+                
+                # 为代码块绑定右键菜单
+                ContextMenu(t, is_entry=False)
                 
                 def copy_code(c=code):
                     if pyperclip: pyperclip.copy(c)
@@ -238,7 +285,6 @@ class ChatBubble(ctk.CTkFrame):
                 self.bind_scroll(btn)
             else:
                 if part:
-                    # 使用 Textbox 代替 Label 实现可选
                     tb = self.create_selectable_label(part, self.main_font, self.text_color_val)
                     tb.pack(fill="x", pady=5)
 
@@ -295,7 +341,7 @@ class DeepSeekApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === 左侧 ===
+        # === Left ===
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=COLOR_SIDEBAR)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(4, weight=1) 
@@ -366,6 +412,9 @@ class DeepSeekApp(ctk.CTk):
         self.entry_msg = ctk.CTkTextbox(input_frame, height=80, font=("Arial", 14), fg_color="transparent", border_width=0)
         self.entry_msg.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.entry_msg.bind("<Return>", self.on_enter_press)
+        
+        # 给输入框也绑定右键菜单！
+        ContextMenu(self.entry_msg, is_entry=True)
 
         btn_box = ctk.CTkFrame(input_frame, fg_color="transparent")
         btn_box.grid(row=1, column=1, sticky="s", padx=10, pady=10)
@@ -510,7 +559,7 @@ class DeepSeekApp(ctk.CTk):
             self.after(0, lambda: bubble_ai.finish_stream() if bubble_ai else None)
             self.after(0, lambda: bubble_r1.finish_stream() if bubble_r1 else None)
 
-    # ... (辅助方法) ...
+    # ... (其余方法保持不变) ...
     def create_new_session(self, save=True):
         new_session = {"id": str(uuid.uuid4()), "title": "新对话", "time": datetime.now().strftime("%m-%d"), "messages": []}
         self.sessions.insert(0, new_session)
@@ -617,7 +666,6 @@ class DeepSeekApp(ctk.CTk):
             self.create_new_session()
 
     def add_bubble_ui(self, role, text, is_reasoning=False, timestamp=None, is_streaming=False):
-        # 传递 chat_scroll 给 bubble，用于事件透传
         b = ChatBubble(self.chat_scroll, role, text, is_reasoning, timestamp, is_streaming, scroll_target=self.chat_scroll)
         b.pack(fill="x", pady=5)
         return b
