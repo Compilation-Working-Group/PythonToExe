@@ -14,7 +14,7 @@ from docx.oxml import OxmlElement
 
 # --- Config ---
 APP_NAME = "公文自动排版助手"
-APP_VERSION = "v2.1.0 (Smart Structure)"
+APP_VERSION = "v2.2.0 (Final Fix)"
 AUTHOR_INFO = "开发者：Python开发者\n基于 GB/T 9704-2012 标准"
 
 DEFAULT_CONFIG = {
@@ -133,7 +133,7 @@ class GongWenFormatterApp(ctk.CTk):
         self.frames["about"] = f
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
-        info = f"{APP_NAME} {APP_VERSION}\n\n改进说明：\n1. 标题识别不再受《》符号干扰。\n2. 修复了作者信息和称谓的对齐问题。\n3. 自动清除文本中的 'SAFE' 干扰字符。"
+        info = f"{APP_NAME} {APP_VERSION}\n\n更新说明：\n1. 修复了“一、”开头的一级标题被错误居中的问题。\n2. 优化了“尊敬的...”等称谓的识别逻辑。\n3. 增强了对短文本的智能判断。"
         lbl = ctk.CTkTextbox(f, font=("Arial", 14), wrap="word")
         lbl.insert("0.0", info)
         lbl.configure(state="disabled")
@@ -220,13 +220,13 @@ class GongWenFormatterApp(ctk.CTk):
         messagebox.showinfo("完成", f"已导出 {count} 个文件到 {d}")
         if os.name == 'nt': os.startfile(d)
 
-    # --- CORE FORMATTING LOGIC ---
+    # --- 核心排版逻辑 (v2.2.0 修复版) ---
     def format_doc(self, path):
         if not os.path.exists(path): raise Exception("文件丢失")
         doc = Document(path)
         cfg = self.config
 
-        # 1. Page Setup
+        # 1. 页面设置
         try:
             sect = doc.sections[0]
             sect.top_margin = Cm(cfg["margins"]["top"])
@@ -236,85 +236,89 @@ class GongWenFormatterApp(ctk.CTk):
             sect.page_width = Cm(21); sect.page_height = Cm(29.7)
         except: pass
 
-        # 2. Structure Analysis & Formatting
-        # We need to identify: Title, Subtitle, Author/Unit, Salutation (Start of Body), Headings, Body
-        
-        # State flags
+        # 2. 结构分析与排版
         has_title = False
         body_started = False
         
         for i, p in enumerate(doc.paragraphs):
-            # Clean "SAFE" artifact
+            # 清理 SAFE 干扰字符
             if "SAFE" in p.text: p.text = p.text.replace("SAFE", "")
             
             txt = p.text.strip()
             if not txt: continue
 
-            # Reset format
+            # 重置格式
             try:
                 p.paragraph_format.first_line_indent = None
                 p.paragraph_format.left_indent = None
                 p.paragraph_format.space_before = Pt(0)
                 p.paragraph_format.space_after = Pt(0)
-            except: pass
-
-            # Apply Base Line Spacing & Grid
-            try:
                 p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 p.paragraph_format.line_spacing = Pt(cfg["line_spacing"])
                 self.set_grid_xml(p)
             except: pass
 
-            # --- Logic ---
+            # --- 优先级判定逻辑 (修复核心) ---
             
-            # A. Explicit Body Start (Salutation)
+            # 1. 最高优先级：显式正文标记 (称谓)
             if re.match(r"^(尊敬的|各位|亲爱的|大家好)", txt):
                 body_started = True
-                self.style_body(p, cfg) # Salutation is part of body, left align, indent 2
+                self.style_body(p, cfg) 
                 continue
 
-            # B. If body already started, detect Headings or Body
+            # 2. 次高优先级：标题序号判定 (修复“一、引言”被居中的问题)
+            # 只要看到序号，说明肯定是正文结构的一部分，强制进入正文模式
+            if re.match(r"^[一二三四五六七八九十]+、", txt):
+                body_started = True
+                self.style_h1(p, cfg)
+                continue
+            if re.match(r"^（[一二三四五六七八九十]+）", txt):
+                body_started = True
+                self.style_h2(p, cfg)
+                continue
+            if re.match(r"^\d+\.", txt):
+                body_started = True
+                self.style_h3(p, cfg)
+                continue
+
+            # 3. 如果正文已经开始，则剩下的都是正文
             if body_started:
-                if re.match(r"^[一二三四五六七八九十]+、", txt):
-                    self.style_h1(p, cfg)
-                elif re.match(r"^（[一二三四五六七八九十]+）", txt):
-                    self.style_h2(p, cfg)
-                elif re.match(r"^\d+\.", txt): # Matches "1." or "1、" if normalized
-                    self.style_h3(p, cfg)
-                else:
-                    self.style_body(p, cfg)
+                self.style_body(p, cfg)
                 continue
 
-            # C. Header Area (Before Body)
+            # 4. 版头区域判定 (只有 body_started=False 时才会走到这里)
             
-            # 1. Title (First significant line)
+            # 标题 (第一段有效内容)
             if not has_title:
-                # Rule: Short enough, no ending punctuation, or starts with 《
-                if len(txt) < 50 and not txt.startswith("——") and not txt.startswith("--"):
+                # 排除以破折号开头的行 (副标题)
+                if not txt.startswith("——") and not txt.startswith("--"):
+                    # 允许较长标题
                     self.style_title(p, cfg)
                     has_title = True
                     continue
             
-            # 2. Subtitle (Starts with dash)
+            # 副标题
             if txt.startswith("——") or txt.startswith("--") or (txt.startswith("（") and txt.endswith("）") and len(txt)<30):
                 self.style_subtitle(p, cfg)
                 continue
 
-            # 3. Author/Unit (Short, centered, after title, before body)
-            if len(txt) < 25 and has_title and not body_started:
-                self.style_subtitle(p, cfg) # Use subtitle style (KaiTi, centered)
+            # 作者/单位 (短文本，且不是标题，也不是序号开头)
+            # 之前的问题就在这里：'一、引言' 字数少，走到了这里。
+            # 现在因为上面有了“步骤2”的拦截，'一、'开头的内容永远走不到这里了。
+            if len(txt) < 25 and has_title:
+                self.style_subtitle(p, cfg) # 使用副标题/作者样式 (居中)
                 continue
             
-            # 4. Abstract/Keywords
+            # 摘要/关键词
             if txt.startswith("摘要") or txt.startswith("关键词"):
-                self.style_body(p, cfg) # Treat as body text style (FangSong) but maybe bold label?
+                self.style_body(p, cfg)
                 continue
 
-            # Fallback: Treat as body
+            # 兜底：如果都不符合，视为正文开始
             body_started = True
             self.style_body(p, cfg)
 
-        # Tables
+        # 表格处理
         for t in doc.tables:
             for r in t.rows:
                 for c in r.cells:
@@ -323,7 +327,7 @@ class GongWenFormatterApp(ctk.CTk):
                         self.set_font(p, "仿宋_GB2312", 14)
                         self.set_grid_xml(p)
 
-        # Page Number
+        # 页码
         try:
             ftr = doc.sections[0].footer
             p = ftr.paragraphs[0] if ftr.paragraphs else ftr.add_paragraph()
@@ -336,7 +340,7 @@ class GongWenFormatterApp(ctk.CTk):
     def style_title(self, p, cfg):
         self.set_font(p, cfg["fonts"]["title"], cfg["sizes"]["title"])
         p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        p.paragraph_format.space_after = Pt(cfg["line_spacing"]) # Gap after title
+        p.paragraph_format.space_after = Pt(cfg["line_spacing"]) 
         self.set_indent_xml(p, 0)
 
     def style_subtitle(self, p, cfg):
@@ -346,20 +350,23 @@ class GongWenFormatterApp(ctk.CTk):
 
     def style_h1(self, p, cfg):
         self.set_font(p, cfg["fonts"]["h1"], cfg["sizes"]["h1"])
-        self.set_indent_xml(p, 2) # H1 usually has indent in some standards, or 0. Using 2 based on your feedback.
+        p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY # 确保不居中
+        self.set_indent_xml(p, 2) 
 
     def style_h2(self, p, cfg):
         self.set_font(p, cfg["fonts"]["h2"], cfg["sizes"]["h2"])
+        p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
         self.set_indent_xml(p, 2)
 
     def style_h3(self, p, cfg):
         self.set_font(p, cfg["fonts"]["h3"], cfg["sizes"]["h3"], bold=True)
+        p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
         self.set_indent_xml(p, 2)
 
     def style_body(self, p, cfg):
         self.set_font(p, cfg["fonts"]["body"], cfg["sizes"]["body"])
         p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        self.set_indent_xml(p, 2) # Standard 2 char indent
+        self.set_indent_xml(p, 2)
 
     # --- XML Helpers ---
     def set_font(self, p, name, size, bold=False):
@@ -393,7 +400,6 @@ class GongWenFormatterApp(ctk.CTk):
         try:
             p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             r = p.add_run()
-            # Simple page num field
             f1 = OxmlElement('w:fldChar'); f1.set(qn('w:fldCharType'), 'begin')
             txt = OxmlElement('w:instrText'); txt.set(qn('xml:space'), 'preserve'); txt.text = "PAGE"
             f2 = OxmlElement('w:fldChar'); f2.set(qn('w:fldCharType'), 'end')
