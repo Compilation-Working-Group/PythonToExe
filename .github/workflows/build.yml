@@ -1,6 +1,8 @@
 name: Build GongWenFormatter
 
 on:
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -28,21 +30,31 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y python3-tk
 
+    # 关键修复：添加 --hidden-import=lxml 防止文档处理崩溃
     - name: Build Windows
       if: runner.os == 'Windows'
       shell: bash
       run: |
-        pyinstaller --name="公文排版助手" --onefile --windowed --clean main.py
+        pyinstaller --name="公文排版助手" --onefile --windowed --clean \
+        --hidden-import=lxml \
+        --hidden-import=docx \
+        main.py
 
     - name: Build Linux
       if: runner.os == 'Linux'
       run: |
-        pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed --clean main.py
+        pyinstaller --name="GongWenFormatter_Linux" --onefile --windowed --clean \
+        --hidden-import=lxml \
+        --hidden-import=docx \
+        main.py
 
     - name: Build macOS
       if: runner.os == 'macOS'
       run: |
-        pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed --clean main.py
+        pyinstaller --name="GongWenFormatter_Mac" --onefile --windowed --clean \
+        --hidden-import=lxml \
+        --hidden-import=docx \
+        main.py
 
     - name: Rename Output
       shell: bash
