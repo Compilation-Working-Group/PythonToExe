@@ -1,9 +1,25 @@
+import os
+import sys
+
+# --- 核心修复：强制 Linux 使用 UTF-8 编码 ---
+# 必须在导入其他库之前执行，防止 PyInstaller 打包后的环境出现 ascii 编码错误
+if sys.platform.startswith("linux"):
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    os.environ["LANG"] = "C.UTF-8"
+    try:
+        # 尝试重新配置标准输出流
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        # 兼容旧版本环境
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
-import os
-import sys
 import json
 import re
 import uuid
@@ -12,7 +28,7 @@ from datetime import datetime
 import traceback
 import platform
 
-# --- 基础库 ---
+# --- 基础库导入 ---
 try:
     import pyperclip
 except ImportError:
@@ -33,9 +49,9 @@ try:
 except ImportError:
     Presentation = None
 
-# --- 配置区域 ---
+# --- 全局配置 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.6.1 (Right-Click Menu)"
+APP_VERSION = "v2.6.2 (Linux Encoding Fix)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -46,13 +62,13 @@ DEFAULT_CONFIG = {
     "system_prompt": "你是一个乐于助人的AI助手。代码请用Markdown格式。"
 }
 
-# 颜色配置
+# 颜色主题
 COLOR_USER_BUBBLE = "#95EC69" 
 COLOR_AI_BUBBLE = ("#FFFFFF", "#2B2B2B")
 COLOR_BG = ("#F2F2F2", "#1a1a1a")
 COLOR_SIDEBAR = ("#EBEBEB", "#212121")
 
-# Linux 稳定性
+# Linux 稳定性设置
 if platform.system() == "Linux":
     ctk.deactivate_automatic_dpi_awareness()
 
@@ -61,17 +77,17 @@ ctk.set_default_color_theme("blue")
 
 # --- 辅助函数 ---
 def get_base_path():
+    """获取程序运行时的真实路径"""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-# --- 右键菜单逻辑 ---
+# --- 右键菜单组件 ---
 class ContextMenu:
     def __init__(self, widget, is_entry=False):
         self.widget = widget
         self.menu = tk.Menu(widget, tearoff=0, font=("Arial", 10))
         
-        # 添加菜单项
         self.menu.add_command(label="复制 (Copy)", command=self.copy_text)
         if is_entry:
             self.menu.add_command(label="粘贴 (Paste)", command=self.paste_text)
@@ -79,7 +95,7 @@ class ContextMenu:
             self.menu.add_separator()
             self.menu.add_command(label="清空 (Clear)", command=self.clear_text)
 
-        # 绑定右键事件 (Linux/Win: Button-3, Mac: Button-2 or Button-3)
+        # 绑定右键事件
         widget.bind("<Button-3>", self.show_menu)
         if platform.system() == "Darwin": # Mac兼容
             widget.bind("<Button-2>", self.show_menu)
@@ -92,7 +108,6 @@ class ContextMenu:
 
     def copy_text(self):
         try:
-            # 尝试获取选中的文本
             text = self.widget.get("sel.first", "sel.last")
             if text:
                 if pyperclip: pyperclip.copy(text)
@@ -100,7 +115,7 @@ class ContextMenu:
                     self.widget.clipboard_clear()
                     self.widget.clipboard_append(text)
         except tk.TclError:
-            pass # 没有选中内容
+            pass 
 
     def paste_text(self):
         try:
@@ -117,7 +132,7 @@ class ContextMenu:
     def clear_text(self):
         self.widget.delete("0.0", "end")
 
-
+# --- 附件显示组件 ---
 class AttachmentChip(ctk.CTkFrame):
     def __init__(self, master, filename, command_delete, **kwargs):
         super().__init__(master, fg_color=("gray85", "gray30"), corner_radius=10, **kwargs)
@@ -129,6 +144,7 @@ class AttachmentChip(ctk.CTkFrame):
                             command=command_delete)
         btn.pack(side="right", padx=(0, 5), pady=2)
 
+# --- 聊天气泡组件 ---
 class ChatBubble(ctk.CTkFrame):
     def __init__(self, master, role, text="", is_reasoning=False, timestamp=None, is_streaming=False, scroll_target=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -158,6 +174,7 @@ class ChatBubble(ctk.CTkFrame):
             self.text_color_val = ("black", "white")
             self.prefix = ""
 
+        # 气泡外壳
         self.bubble_inner = ctk.CTkFrame(self, fg_color=bubble_color, corner_radius=12)
         self.bubble_inner.grid(row=0, column=1 if role == "user" else 0, padx=10, pady=5, sticky=anchor)
         self.bind_scroll(self.bubble_inner)
@@ -166,6 +183,7 @@ class ChatBubble(ctk.CTkFrame):
         self.content_frame.pack(fill="both", padx=10, pady=10)
         self.bind_scroll(self.content_frame)
 
+        # 字体设置
         self.main_font = ("Arial", 14) 
         self.code_font = ("Courier", 12)
 
@@ -175,6 +193,7 @@ class ChatBubble(ctk.CTkFrame):
         else:
             self.render_final_content(self.prefix + text)
 
+        # 底部栏
         self.bottom_bar = ctk.CTkFrame(self.bubble_inner, fg_color="transparent", height=20)
         self.bottom_bar.pack(fill="x", padx=10, pady=(0, 5))
         self.bind_scroll(self.bottom_bar)
@@ -191,12 +210,14 @@ class ChatBubble(ctk.CTkFrame):
             self.bind_scroll(ts_lbl)
 
     def bind_scroll(self, widget):
+        """事件透传：让所有子组件支持滚轮滚动"""
         if not self.scroll_target: return
         widget.bind("<Button-4>", lambda e: self.scroll_target._parent_canvas.yview_scroll(-1, "units"))
         widget.bind("<Button-5>", lambda e: self.scroll_target._parent_canvas.yview_scroll(1, "units"))
         widget.bind("<MouseWheel>", lambda e: self.scroll_target._parent_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
 
     def create_selectable_label(self, text, font, text_color):
+        """创建一个看起来像 Label 但可以选中的 Textbox"""
         lines = text.count('\n') + (len(text) // 50) + 1
         height = min(lines * 24 + 20, 600)
         
@@ -213,11 +234,8 @@ class ChatBubble(ctk.CTkFrame):
         tb.insert("0.0", text)
         tb.configure(state="disabled")
         
-        # 绑定滚动
         self.bind_scroll(tb)
-        # 绑定右键菜单 (核心修复)
         ContextMenu(tb, is_entry=False)
-        
         return tb
 
     def append_stream_text(self, delta_text):
@@ -270,8 +288,6 @@ class ChatBubble(ctk.CTkFrame):
                 t.configure(state="disabled")
                 t.pack(fill="x", padx=5, pady=5)
                 self.bind_scroll(t)
-                
-                # 为代码块绑定右键菜单
                 ContextMenu(t, is_entry=False)
                 
                 def copy_code(c=code):
@@ -288,6 +304,7 @@ class ChatBubble(ctk.CTkFrame):
                     tb = self.create_selectable_label(part, self.main_font, self.text_color_val)
                     tb.pack(fill="x", pady=5)
 
+# --- 主程序逻辑 ---
 class DeepSeekApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -336,17 +353,17 @@ class DeepSeekApp(ctk.CTk):
         if not self.config["api_key"]: return
         self.client = OpenAI(api_key=self.config["api_key"], base_url="https://api.deepseek.com")
 
-    # --- UI 构建 ---
+    # --- UI 布局 ---
     def setup_ui(self):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === Left ===
+        # 侧边栏
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=COLOR_SIDEBAR)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(4, weight=1) 
 
-        # 1. Header
+        # 1. 顶部信息
         top_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(25, 15))
         ctk.CTkLabel(top_frame, text=APP_NAME, font=("Arial", 22, "bold")).pack(anchor="w")
@@ -356,26 +373,26 @@ class DeepSeekApp(ctk.CTk):
         ctk.CTkLabel(dev_frame, text=DEV_NAME, font=("Arial", 11, "bold"), text_color="#3498DB").pack(side="left", padx=5)
         ctk.CTkLabel(top_frame, text=APP_VERSION, font=("Arial", 10), text_color="gray50").pack(anchor="w", pady=(2,0))
 
-        # 2. New Chat
+        # 2. 新对话按钮
         self.btn_new = ctk.CTkButton(self.sidebar, text="+ 开启新对话", height=40, font=("Arial", 14), 
                                      fg_color="#3498DB", hover_color="#2980B9",
                                      command=lambda: self.create_new_session(save=True))
         self.btn_new.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="ew")
 
-        # 3. Status
+        # 3. 状态面板
         self.status_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#333333"), corner_radius=8)
         self.status_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=5)
         ctk.CTkLabel(self.status_frame, text="当前模型状态", font=("Arial", 10, "bold"), text_color="gray").pack(pady=(5,0))
         self.lbl_model_status = ctk.CTkLabel(self.status_frame, text="初始化中...", font=("Arial", 12), text_color="#3498DB")
         self.lbl_model_status.pack(pady=(0,5))
 
-        # 4. History
+        # 4. 历史记录列表
         ctk.CTkLabel(self.sidebar, text="历史记录", font=("Arial", 12), text_color="gray").grid(row=3, column=0, sticky="nw", padx=15, pady=(10,0))
         self.history_list = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
         self.history_list.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.render_history_list()
 
-        # 5. Settings
+        # 5. 设置区域
         setting_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#2B2B2B"), corner_radius=10)
         setting_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=20)
         
@@ -389,11 +406,11 @@ class DeepSeekApp(ctk.CTk):
         self.entry_key.pack(pady=5, padx=10, fill="x")
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 6. Clear
+        # 6. 清空按钮
         self.btn_clear = ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history)
         self.btn_clear.grid(row=6, column=0, sticky="ew", padx=15, pady=10)
 
-        # === Right ===
+        # === 右侧主区域 ===
         self.main_area = ctk.CTkFrame(self, fg_color=COLOR_BG)
         self.main_area.grid(row=0, column=1, sticky="nsew")
         self.main_area.grid_rowconfigure(0, weight=1)
@@ -413,7 +430,7 @@ class DeepSeekApp(ctk.CTk):
         self.entry_msg.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         self.entry_msg.bind("<Return>", self.on_enter_press)
         
-        # 给输入框也绑定右键菜单！
+        # 输入框右键菜单
         ContextMenu(self.entry_msg, is_entry=True)
 
         btn_box = ctk.CTkFrame(input_frame, fg_color="transparent")
@@ -427,7 +444,7 @@ class DeepSeekApp(ctk.CTk):
         
         self.btn_stop = ctk.CTkButton(btn_box, text="⏹", width=40, fg_color="#C0392B", command=self.stop_generation)
 
-    # --- Logic ---
+    # --- 逻辑处理 ---
     def update_settings(self):
         self.config["use_search"] = self.search_var.get()
         self.config["is_r1"] = self.r1_var.get()
@@ -559,7 +576,7 @@ class DeepSeekApp(ctk.CTk):
             self.after(0, lambda: bubble_ai.finish_stream() if bubble_ai else None)
             self.after(0, lambda: bubble_r1.finish_stream() if bubble_r1 else None)
 
-    # ... (其余方法保持不变) ...
+    # ... (其余辅助方法) ...
     def create_new_session(self, save=True):
         new_session = {"id": str(uuid.uuid4()), "title": "新对话", "time": datetime.now().strftime("%m-%d"), "messages": []}
         self.sessions.insert(0, new_session)
@@ -697,5 +714,6 @@ if __name__ == "__main__":
         app = DeepSeekApp()
         app.mainloop()
     except Exception as e:
+        # 记录详细错误日志
         with open("crash_log.txt", "w") as f:
             f.write(traceback.format_exc())
