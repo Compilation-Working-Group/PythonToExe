@@ -34,7 +34,7 @@ except ImportError:
 
 # --- 配置区域 ---
 APP_NAME = "DeepSeek Pro"
-APP_VERSION = "v2.4.2 (Layout Fixed)"
+APP_VERSION = "v2.5.0 (Typewriter Smooth)"
 DEV_NAME = "Yu Jinquan"
 
 DEFAULT_CONFIG = {
@@ -72,15 +72,17 @@ class AttachmentChip(ctk.CTkFrame):
         btn.pack(side="right", padx=(0, 5), pady=2)
 
 class ChatBubble(ctk.CTkFrame):
-    def __init__(self, master, role, text="", is_reasoning=False, timestamp=None, **kwargs):
+    def __init__(self, master, role, text="", is_reasoning=False, timestamp=None, is_streaming=False, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self.role = role
         self.raw_text = text 
         self.is_reasoning = is_reasoning
+        self.is_streaming = is_streaming # 标记是否处于流式输出中
         
         self.grid_columnconfigure(0 if role == "user" else 1, weight=1)
         self.grid_columnconfigure(1 if role == "user" else 0, weight=0)
         
+        # 样式定义
         if role == "user":
             bubble_color = COLOR_USER_BUBBLE
             text_color = "black"
@@ -92,19 +94,40 @@ class ChatBubble(ctk.CTkFrame):
 
         if is_reasoning:
             bubble_color = ("#F0F0F0", "#333333")
-            text_color = "gray"
+            self.text_color_val = "gray"
             self.prefix = "🧠 深度思考:\n"
         else:
+            self.text_color_val = ("black", "white")
             self.prefix = ""
 
+        # 气泡外壳
         self.bubble_inner = ctk.CTkFrame(self, fg_color=bubble_color, corner_radius=12)
         self.bubble_inner.grid(row=0, column=1 if role == "user" else 0, padx=10, pady=5, sticky=anchor)
 
+        # 内容容器
         self.content_frame = ctk.CTkFrame(self.bubble_inner, fg_color="transparent")
         self.content_frame.pack(fill="both", padx=10, pady=10)
 
-        self.render_content(self.prefix + text, text_color)
+        # --- 核心：打字机模式 vs 渲染模式 ---
+        if self.is_streaming:
+            # 1. 流式模式：创建一个纯文本框用于追加，此时不进行Markdown渲染，保证流畅不闪烁
+            self.stream_widget = ctk.CTkTextbox(
+                self.content_frame, 
+                font=("Microsoft YaHei UI", 14), 
+                text_color=self.text_color_val,
+                fg_color="transparent", 
+                wrap="word",
+                height=40, # 初始高度
+                width=400
+            )
+            self.stream_widget.pack(fill="both", expand=True)
+            self.stream_widget.insert("0.0", self.prefix + text)
+            self.stream_widget.configure(state="disabled")
+        else:
+            # 2. 静态模式：直接渲染最终效果（含代码高亮）
+            self.render_final_content(self.prefix + text)
 
+        # 底部栏
         self.bottom_bar = ctk.CTkFrame(self.bubble_inner, fg_color="transparent", height=20)
         self.bottom_bar.pack(fill="x", padx=10, pady=(0, 5))
         
@@ -117,11 +140,27 @@ class ChatBubble(ctk.CTkFrame):
         if timestamp:
             ctk.CTkLabel(self.bottom_bar, text=timestamp, font=("Arial", 10), text_color="gray").pack(side="left")
 
-    def update_text(self, new_text):
-        self.raw_text = new_text
-        for widget in self.content_frame.winfo_children(): widget.destroy()
-        text_color = "gray" if self.is_reasoning else ("black", "white")
-        self.render_content(self.prefix + new_text, text_color)
+    def append_stream_text(self, delta_text):
+        """ 仅用于流式模式：向后追加文本（无闪烁） """
+        if not self.is_streaming: return
+        
+        self.raw_text += delta_text
+        self.stream_widget.configure(state="normal")
+        self.stream_widget.insert("end", delta_text)
+        self.stream_widget.configure(state="disabled")
+        self.stream_widget.see("end")
+        
+        # 动态调整高度 (防止文本框太小)
+        # 简单估算：每20个字符或换行符增加高度
+        # 这里为了性能，不做复杂计算，依靠外部容器自适应
+
+    def finish_stream(self):
+        """ 结束流式：销毁文本框，转为渲染模式 """
+        if not self.is_streaming: return
+        
+        self.is_streaming = False
+        self.stream_widget.destroy() # 销毁临时文本框
+        self.render_final_content(self.prefix + self.raw_text) # 渲染最终 Markdown
 
     def copy_content(self):
         try:
@@ -143,7 +182,8 @@ class ChatBubble(ctk.CTkFrame):
         except Exception:
             self.btn_copy.configure(text="❌ 失败", text_color="red")
 
-    def render_content(self, text, text_color):
+    def render_final_content(self, text):
+        """ 解析 Markdown 并显示 """
         parts = re.split(r'(```[\s\S]*?```)', text)
         for part in parts:
             if part.startswith("```") and part.endswith("```"):
@@ -171,7 +211,7 @@ class ChatBubble(ctk.CTkFrame):
                               command=copy_code).pack(anchor="ne", padx=5, pady=2)
             else:
                 if part:
-                    ctk.CTkLabel(self.content_frame, text=part, text_color=text_color, justify="left", 
+                    ctk.CTkLabel(self.content_frame, text=part, text_color=self.text_color_val, justify="left", 
                                  font=("Microsoft YaHei UI", 14), wraplength=600).pack(fill="x", anchor="w")
 
 class DeepSeekApp(ctk.CTk):
@@ -222,7 +262,7 @@ class DeepSeekApp(ctk.CTk):
         if not self.config["api_key"]: return
         self.client = OpenAI(api_key=self.config["api_key"], base_url="https://api.deepseek.com")
 
-    # --- UI 构建 (布局修复核心) ---
+    # --- UI 构建 ---
     def setup_ui(self):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -230,11 +270,9 @@ class DeepSeekApp(ctk.CTk):
         # === 左侧 ===
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=COLOR_SIDEBAR)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        
-        # 关键修改：让第4行（历史记录列表）可伸缩，其他行固定
         self.sidebar.grid_rowconfigure(4, weight=1) 
 
-        # 1. Header (Row 0)
+        # 1. Header
         top_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(25, 15))
         ctk.CTkLabel(top_frame, text=APP_NAME, font=("Arial", 22, "bold")).pack(anchor="w")
@@ -244,28 +282,28 @@ class DeepSeekApp(ctk.CTk):
         ctk.CTkLabel(dev_frame, text=DEV_NAME, font=("Arial", 11, "bold"), text_color="#3498DB").pack(side="left", padx=5)
         ctk.CTkLabel(top_frame, text=APP_VERSION, font=("Arial", 10), text_color="gray50").pack(anchor="w", pady=(2,0))
 
-        # 2. New Chat (Row 1)
+        # 2. New Chat
         self.btn_new = ctk.CTkButton(self.sidebar, text="+ 开启新对话", height=40, font=("Arial", 14), 
                                      fg_color="#3498DB", hover_color="#2980B9",
                                      command=lambda: self.create_new_session(save=True))
         self.btn_new.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="ew")
 
-        # 3. Status (Row 2)
+        # 3. Status
         self.status_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#333333"), corner_radius=8)
         self.status_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=5)
         ctk.CTkLabel(self.status_frame, text="当前模型状态", font=("Arial", 10, "bold"), text_color="gray").pack(pady=(5,0))
         self.lbl_model_status = ctk.CTkLabel(self.status_frame, text="初始化中...", font=("Arial", 12), text_color="#3498DB")
         self.lbl_model_status.pack(pady=(0,5))
 
-        # 4. History Title (Row 3)
+        # 4. History Title
         ctk.CTkLabel(self.sidebar, text="历史记录", font=("Arial", 12), text_color="gray").grid(row=3, column=0, sticky="nw", padx=15, pady=(10,0))
         
-        # 5. History List (Row 4 - Expandable)
+        # 5. History List
         self.history_list = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
         self.history_list.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.render_history_list()
 
-        # 6. Settings (Row 5)
+        # 6. Settings
         setting_frame = ctk.CTkFrame(self.sidebar, fg_color=("white", "#2B2B2B"), corner_radius=10)
         setting_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=20)
         
@@ -280,7 +318,7 @@ class DeepSeekApp(ctk.CTk):
         
         ctk.CTkButton(setting_frame, text="保存配置", height=24, command=self.save_key).pack(pady=10)
 
-        # 7. Clear Button (Row 6) - 修复点：改用 Grid
+        # 7. Clear
         self.btn_clear = ctk.CTkButton(self.sidebar, text="🗑️ 清空所有", fg_color="transparent", text_color="#C0392B", hover_color=("#FADBD8", "#522"), command=self.clear_all_history)
         self.btn_clear.grid(row=6, column=0, sticky="ew", padx=15, pady=10)
 
@@ -315,7 +353,7 @@ class DeepSeekApp(ctk.CTk):
         
         self.btn_stop = ctk.CTkButton(btn_box, text="⏹", width=40, fg_color="#C0392B", command=self.stop_generation)
 
-    # --- 逻辑功能 (保持不变) ---
+    # --- Logic ---
     def update_settings(self):
         self.config["use_search"] = self.search_var.get()
         self.config["is_r1"] = self.r1_var.get()
@@ -337,7 +375,7 @@ class DeepSeekApp(ctk.CTk):
 
     def throttled_scroll_to_bottom(self):
         now = time.time()
-        if now - self.last_scroll_time > 0.1:
+        if now - self.last_scroll_time > 0.05: # 50ms 刷新
             self.chat_scroll.update_idletasks()
             try: self.chat_scroll._parent_canvas.yview_moveto(1.0)
             except: pass
@@ -403,37 +441,55 @@ class DeepSeekApp(ctk.CTk):
                 stream=True
             )
             
+            # --- 核心：流式逻辑 ---
             r1_text = ""
             ai_text = ""
             bubble_r1 = None
             bubble_ai = None
             
+            # 闭包 helper
             def get_r1():
                 nonlocal bubble_r1
-                if not bubble_r1: bubble_r1 = self.add_bubble_ui("ai", "", is_reasoning=True)
+                if not bubble_r1: 
+                    # 初始化一个流式气泡
+                    bubble_r1 = self.add_bubble_ui("ai", "", is_reasoning=True, is_streaming=True)
                 return bubble_r1
             def get_ai():
                 nonlocal bubble_ai
-                if not bubble_ai: bubble_ai = self.add_bubble_ui("ai", "")
+                if not bubble_ai: 
+                    # 初始化一个流式气泡
+                    bubble_ai = self.add_bubble_ui("ai", "", is_streaming=True)
                 return bubble_ai
 
             for chunk in response:
                 if not self.is_running: break
                 delta = chunk.choices[0].delta
                 
+                # 思考流
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    r1_text += delta.reasoning_content
-                    self.after(0, lambda b=get_r1(), t=r1_text: b.update_text(t))
+                    c = delta.reasoning_content
+                    r1_text += c
+                    self.after(0, lambda b=get_r1(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
+                # 正文流
                 if hasattr(delta, 'content') and delta.content:
-                    ai_text += delta.content
-                    self.after(0, lambda b=get_ai(), t=ai_text: b.update_text(t))
+                    c = delta.content
+                    ai_text += c
+                    self.after(0, lambda b=get_ai(), t=c: b.append_stream_text(t))
                     self.after(0, self.throttled_scroll_to_bottom)
 
-            ts = datetime.now().strftime("%H:%M")
-            session["messages"].append({"role": "ai", "content": ai_text, "reasoning": r1_text, "timestamp": ts})
-            self.save_sessions()
+            # 流式结束：转换为渲染态
+            def finalize():
+                if bubble_r1: bubble_r1.finish_stream()
+                if bubble_ai: bubble_ai.finish_stream()
+                
+                # 保存
+                ts = datetime.now().strftime("%H:%M")
+                session["messages"].append({"role": "ai", "content": ai_text, "reasoning": r1_text, "timestamp": ts})
+                self.save_sessions()
+            
+            self.after(0, finalize)
 
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("API Error", str(e)))
@@ -491,10 +547,13 @@ class DeepSeekApp(ctk.CTk):
         self.render_attachments_ui()
         session = self.sessions[self.current_session_index]
         for msg in session.get("messages", []):
-            if msg["role"] == "user": self.add_bubble_ui("user", msg["content"], timestamp=msg.get("timestamp"))
+            if msg["role"] == "user": 
+                self.add_bubble_ui("user", msg["content"], timestamp=msg.get("timestamp"))
             else:
-                if msg.get("reasoning"): self.add_bubble_ui("ai", msg["reasoning"], is_reasoning=True, timestamp=msg.get("timestamp"))
-                if msg.get("content"): self.add_bubble_ui("ai", msg["content"], is_reasoning=False, timestamp=msg.get("timestamp"))
+                if msg.get("reasoning"): 
+                    self.add_bubble_ui("ai", msg["reasoning"], is_reasoning=True, timestamp=msg.get("timestamp"), is_streaming=False)
+                if msg.get("content"): 
+                    self.add_bubble_ui("ai", msg["content"], is_reasoning=False, timestamp=msg.get("timestamp"), is_streaming=False)
         self.force_scroll_to_bottom()
 
     def upload_files(self):
@@ -545,8 +604,8 @@ class DeepSeekApp(ctk.CTk):
             self.sessions = []
             self.create_new_session()
 
-    def add_bubble_ui(self, role, text, is_reasoning=False, timestamp=None):
-        b = ChatBubble(self.chat_scroll, role, text, is_reasoning, timestamp)
+    def add_bubble_ui(self, role, text, is_reasoning=False, timestamp=None, is_streaming=False):
+        b = ChatBubble(self.chat_scroll, role, text, is_reasoning, timestamp, is_streaming)
         b.pack(fill="x", pady=5)
         return b
 
