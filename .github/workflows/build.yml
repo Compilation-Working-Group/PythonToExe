@@ -23,8 +23,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Linux runtime deps for Qt GUI (xcb).
-      # Qt 6.5+ 上常见缺 libxcb-cursor0 会导致 xcb 平台插件无法初始化。
+      # Linux runtime deps for Qt GUI (xcb)
       - name: Install Linux runtime deps (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -43,7 +42,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # Linux: improve Chinese input under fcitx5 by adding Qt6 fcitx plugin into PySide6 plugins. 
+      # Linux: improve Chinese input under fcitx5
       - name: Install fcitx5 Qt6 frontend (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -69,6 +68,7 @@ PY
           if [[ -z "$FCITX_SO" ]]; then
             FCITX_SO="$(find /usr -type f -name 'libfcitx5platforminputcontextplugin.so' 2>/dev/null | head -n 1 || true)"
           fi
+
           if [[ -z "$FCITX_SO" ]]; then
             echo "ERROR: Cannot find libfcitx5platforminputcontextplugin.so"
             exit 1
@@ -77,9 +77,6 @@ PY
           cp -v "$FCITX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
           ls -la "$PYSIDE_QT_PLUGINS/platforminputcontexts" | sed -n '1,200p'
 
-      # Build with PyInstaller
-      # PyInstaller --onedir/--onefile are standard options. [3](https://pyinstaller.org/en/stable/usage.html)
-      # Qt for Python + PyInstaller: onedir is generally more controllable for plugins. [2](https://doc.qt.io/qtforpython-6.5/deployment/deployment-pyinstaller.html)
       - name: Build with PyInstaller
         shell: bash
         run: |
