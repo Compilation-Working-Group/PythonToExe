@@ -1594,26 +1594,24 @@ def run_cli_if_requested():
 def main():
     run_cli_if_requested()
     
-    # === FIX: Linux Input Method Patch ===
-    # 强制设置输入法环境变量，解决 Ubuntu/Fcitx 中文输入无法调出的问题
+    # === FIX: Linux Input Method Auto-Detect ===
+    # 自动检测当前系统的输入法（IBus 或 Fcitx），解决 Linux 下无法输入中文的问题
     if sys.platform.startswith("linux"):
-        # 尝试检测当前桌面环境或输入法
-        desktop = os.environ.get("XDG_SESSION_DESKTOP", "").lower()
-        im_module = os.environ.get("GTK_IM_MODULE", "")
-        
-        if "QT_IM_MODULE" not in os.environ:
-            # 如果是 Ubuntu 默认环境 (GNOME) 且未显式使用 fcitx，尝试设为 ibus
-            if ("ubuntu" in desktop or "gnome" in desktop) and "fcitx" not in im_module:
-                os.environ["QT_IM_MODULE"] = "ibus"
-            else:
-                # 其他情况或明确使用了 fcitx，则强制设为 fcitx
-                os.environ["QT_IM_MODULE"] = "fcitx"
-        print(f"Linux Patch: QT_IM_MODULE={os.environ.get('QT_IM_MODULE')}")
-    # =====================================
+        xmods = os.environ.get("XMODIFIERS", "").lower()
+        if "fcitx" in xmods:
+            os.environ["QT_IM_MODULE"] = "fcitx"
+        elif "ibus" in xmods:
+            os.environ["QT_IM_MODULE"] = "ibus"
+        # 如果没有检测到，则尝试使用 gtk3 主题（通常能兼容输入法）
+        elif "QT_IM_MODULE" not in os.environ:
+             os.environ["QT_QPA_PLATFORMTHEME"] = "gtk3"
+
+        print(f"Linux Patch: XMODIFIERS={xmods} -> QT_IM_MODULE={os.environ.get('QT_IM_MODULE')}")
+    # ===========================================
 
     app = QtWidgets.QApplication(sys.argv)
     
-    # 字体优化（可选）
+    # 字体优化（防止中文乱码或过小）
     if sys.platform.startswith("linux"):
         app.setFont(QtGui.QFont("WenQuanYi Micro Hei", 10))
     else:
