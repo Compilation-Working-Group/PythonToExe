@@ -15,7 +15,7 @@ APP_ORG = "YuJinQuanLab"
 SETTINGS_FILE = "settings.json"
 AUTOSAVE_FILE = "autosave.paperwriter.json"
 
-# DeepSeek defaults (OpenAI-compatible)
+# DeepSeek defaults
 DEFAULT_API_BASE = "https://api.deepseek.com"
 DEFAULT_MODEL_CHAT = "deepseek-chat"
 DEFAULT_MODEL_REASONER = "deepseek-reasoner"
@@ -1594,26 +1594,16 @@ def run_cli_if_requested():
 def main():
     run_cli_if_requested()
     
-    # === FIX: Linux Input Method Auto-Detect (REVISED) ===
-    # 逻辑修改：如果用户已经设置了环境变量，绝对不覆盖！
+    # === FIX: Linux Input Method (CLEANED) ===
+    # 我们彻底移除了自动设置环境变量的逻辑。
+    # 软件启动时不带任何预设偏见。
     if sys.platform.startswith("linux"):
-        print(f"[Debug] Initial XMODIFIERS: {os.environ.get('XMODIFIERS')}")
-        print(f"[Debug] Initial QT_IM_MODULE: {os.environ.get('QT_IM_MODULE')}")
-
-        if "QT_IM_MODULE" in os.environ:
-             print(f"[Info] Using User-Defined QT_IM_MODULE: {os.environ['QT_IM_MODULE']}")
-        elif "QT_QPA_PLATFORMTHEME" in os.environ:
-             print(f"[Info] Using User-Defined QT_QPA_PLATFORMTHEME: {os.environ['QT_QPA_PLATFORMTHEME']}")
-        else:
-            # 只有当用户什么都没设置时，才尝试自动修复
-            # 这里的自动修复也改得更保守，不再强制 fcitx，因为 fcitx 插件经常缺失
-            # 推荐默认回退到 gtk3 模式，因为这是最稳妥的
-            pass
-    # =====================================================
+        print("Linux Launch: No environment variables forced. Using system default.")
+    # =========================================
 
     app = QtWidgets.QApplication(sys.argv)
     
-    # 字体优化（防止中文乱码或过小）
+    # 字体优化
     if sys.platform.startswith("linux"):
         app.setFont(QtGui.QFont("WenQuanYi Micro Hei", 10))
     else:
