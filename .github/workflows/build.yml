@@ -1,9 +1,7 @@
 name: Build Desktop App (Win/macOS/Linux)
 
 on:
-  push:
-    branches: ["main"]
-  workflow_dispatch:
+  workflow_dispatch: # 已取消自动触发，仅保留手动运行
 
 jobs:
   build:
@@ -22,8 +20,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip' # 开启缓存加速后续运行
 
-      # Linux runtime deps for Qt GUI (xcb)
       - name: Install Linux runtime deps (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -34,7 +32,8 @@ jobs:
             libxcb-icccm4 \
             libxcb-keysyms1 \
             libxcb-render-util0 \
-            libxkbcommon-x11-0
+            libxkbcommon-x11-0 \
+            fcitx5-frontend-qt6
 
       - name: Install Python dependencies
         run: |
@@ -42,54 +41,44 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # Linux: improve Chinese input under fcitx5
-      - name: Install fcitx5 Qt6 frontend (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fcitx5-frontend-qt6
-
       - name: Patch PySide6 with fcitx5 plugin (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          set -euxo pipefail
+          # 定位 PySide6 插件目录
+          PYSIDE_QT_PLUGINS=$(python -c "import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), 'Qt', 'plugins'))")
+          TARGET_DIR="$PYSIDE_QT_PLUGINS/platforminputcontexts"
+          mkdir -p "$TARGET_DIR"
 
-          PYSIDE_QT_PLUGINS="$(python - <<'PY'
-import os, PySide6
-base = os.path.dirname(PySide6.__file__)
-print(os.path.join(base, "Qt", "plugins"))
-PY
-)"
-          echo "PySide6 Qt plugins: $PYSIDE_QT_PLUGINS"
-          mkdir -p "$PYSIDE_QT_PLUGINS/platforminputcontexts"
-
-          FCITX_SO="$(dpkg -L fcitx5-frontend-qt6 | grep -E 'libfcitx5platforminputcontextplugin\.so$' || true)"
-          if [[ -z "$FCITX_SO" ]]; then
-            FCITX_SO="$(find /usr -type f -name 'libfcitx5platforminputcontextplugin.so' 2>/dev/null | head -n 1 || true)"
-          fi
-
-          if [[ -z "$FCITX_SO" ]]; then
-            echo "ERROR: Cannot find libfcitx5platforminputcontextplugin.so"
+          # 查找 fcitx5 插件位置
+          FCITX_SO=$(find /usr/lib -name "libfcitx5platforminputcontextplugin.so" 2>/dev/null | head -n 1)
+          
+          if [ -z "$FCITX_SO" ]; then
+            echo "Error: fcitx5 qt6 plugin not found."
             exit 1
           fi
 
-          cp -v "$FCITX_SO" "$PYSIDE_QT_PLUGINS/platforminputcontexts/"
-          ls -la "$PYSIDE_QT_PLUGINS/platforminputcontexts" | sed -n '1,200p'
+          echo "Found fcitx5 plugin at: $FCITX_SO"
+          cp "$FCITX_SO" "$TARGET_DIR/"
+          echo "Successfully patched PySide6 plugins."
 
       - name: Build with PyInstaller
         shell: bash
         run: |
+          # 统一清理
           rm -rf build dist || true
+          
+          # 根据系统执行打包
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            pyinstaller --noconfirm --clean --onedir --name PaperWriter main.py
+            # Linux 环境下为了确保插件被正确包含，建议使用 --onedir 并手动检查
+            pyinstaller --noconfirm --clean --onedir --windowed --name PaperWriter main.py
           else
+            # Windows/macOS 使用单文件模式
             pyinstaller --noconfirm --clean --onefile --windowed --name PaperWriter main.py
           fi
-          ls -R dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PaperWriter-${{ runner.os }}
-          path: dist/**
+          path: dist/
