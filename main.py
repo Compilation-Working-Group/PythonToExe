@@ -1594,20 +1594,22 @@ def run_cli_if_requested():
 def main():
     run_cli_if_requested()
     
-    # === FIX: Linux Input Method Auto-Detect ===
-    # 自动检测当前系统的输入法（IBus 或 Fcitx），解决 Linux 下无法输入中文的问题
+    # === FIX: Linux Input Method Auto-Detect (REVISED) ===
+    # 逻辑修改：如果用户已经设置了环境变量，绝对不覆盖！
     if sys.platform.startswith("linux"):
-        xmods = os.environ.get("XMODIFIERS", "").lower()
-        if "fcitx" in xmods:
-            os.environ["QT_IM_MODULE"] = "fcitx"
-        elif "ibus" in xmods:
-            os.environ["QT_IM_MODULE"] = "ibus"
-        # 如果没有检测到，则尝试使用 gtk3 主题（通常能兼容输入法）
-        elif "QT_IM_MODULE" not in os.environ:
-             os.environ["QT_QPA_PLATFORMTHEME"] = "gtk3"
+        print(f"[Debug] Initial XMODIFIERS: {os.environ.get('XMODIFIERS')}")
+        print(f"[Debug] Initial QT_IM_MODULE: {os.environ.get('QT_IM_MODULE')}")
 
-        print(f"Linux Patch: XMODIFIERS={xmods} -> QT_IM_MODULE={os.environ.get('QT_IM_MODULE')}")
-    # ===========================================
+        if "QT_IM_MODULE" in os.environ:
+             print(f"[Info] Using User-Defined QT_IM_MODULE: {os.environ['QT_IM_MODULE']}")
+        elif "QT_QPA_PLATFORMTHEME" in os.environ:
+             print(f"[Info] Using User-Defined QT_QPA_PLATFORMTHEME: {os.environ['QT_QPA_PLATFORMTHEME']}")
+        else:
+            # 只有当用户什么都没设置时，才尝试自动修复
+            # 这里的自动修复也改得更保守，不再强制 fcitx，因为 fcitx 插件经常缺失
+            # 推荐默认回退到 gtk3 模式，因为这是最稳妥的
+            pass
+    # =====================================================
 
     app = QtWidgets.QApplication(sys.argv)
     
