@@ -15,7 +15,7 @@ APP_ORG = "YuJinQuanLab"
 SETTINGS_FILE = "settings.json"
 AUTOSAVE_FILE = "autosave.paperwriter.json"
 
-# DeepSeek defaults (OpenAI-compatible) [1](https://api-docs.deepseek.com/)
+# DeepSeek defaults (OpenAI-compatible)
 DEFAULT_API_BASE = "https://api.deepseek.com"
 DEFAULT_MODEL_CHAT = "deepseek-chat"
 DEFAULT_MODEL_REASONER = "deepseek-reasoner"
@@ -94,20 +94,6 @@ def safe_json_loads(text: str) -> Optional[Any]:
             return json.loads(t)
         except Exception:
             return None
-
-
-def parse_kv_instructions(text: str) -> Dict[str, str]:
-    d = {}
-    if not (text or "").strip():
-        return d
-    parts = re.split(r"[;\n，,；]+", text.strip())
-    for p in parts:
-        if "=" in p:
-            k, v = p.split("=", 1)
-            k, v = k.strip(), v.strip()
-            if k and v:
-                d[k] = v
-    return d
 
 
 # =========================
@@ -230,12 +216,6 @@ class LLMConfig:
 
 
 class OpenAICompatClient:
-    """
-    DeepSeek OpenAI-compatible:
-    base_url: https://api.deepseek.com (or /v1)
-    endpoint: POST /chat/completions
-    models: deepseek-chat / deepseek-reasoner [1](https://api-docs.deepseek.com/)
-    """
     def __init__(self, cfg: LLMConfig, logger):
         self.cfg = cfg
         self.logger = logger
@@ -275,7 +255,7 @@ class OpenAICompatClient:
 
 
 # =========================
-# Templates (optimized for your 4 common paper types)
+# Templates
 # =========================
 GENRES = ["论文", "计划", "反思", "案例", "总结", "自定义"]
 TEMPLATES = [
@@ -374,7 +354,7 @@ def missing_required(template: str, outline_md: str) -> List[str]:
 
 
 # =========================
-# Engine (Ultimate)
+# Engine
 # =========================
 class WriterEngineUltimate:
     def __init__(self, client: OpenAICompatClient, logger):
@@ -382,7 +362,6 @@ class WriterEngineUltimate:
         self.logger = logger
 
     def _model_for(self, task: str, prefer_reasoner: bool) -> str:
-        # default: writing with chat; rigorous analysis/check with reasoner if available
         if prefer_reasoner:
             return self.client.cfg.model_reasoner or DEFAULT_MODEL_REASONER
         return self.client.cfg.model_chat or DEFAULT_MODEL_CHAT
@@ -473,7 +452,6 @@ class WriterEngineUltimate:
             f"参考文献占位：\n{ref_hint}\n\n"
             f"请对章节《{sec_title}》执行：{task}。\n"
             "- 如果涉及数据但未提供，请用“（数据待补）”标注，不要捏造具体数值。\n"
-            "- 保持与论文类型匹配：教学研究重证据链；实验研究重方法与统计；综述重框架与缺口；案例研究重情境与启示。\n"
         )
         out = self.client.chat([
             {"role": "system", "content": sys_prompt},
@@ -531,7 +509,7 @@ class WriterEngineUltimate:
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
-        self.setWindowTitle("设置 - DeepSeek API（可选）")
+        self.setWindowTitle("设置 - DeepSeek API")
         self.setModal(True)
         self.resize(820, 380)
 
@@ -551,10 +529,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.timeout.setRange(10, 300)
 
         form = QtWidgets.QFormLayout()
-        form.addRow("API Base（推荐 https://api.deepseek.com）", self.api_base)
-        form.addRow("API Key", self.api_key)
-        form.addRow("Chat 模型（默认 deepseek-chat）", self.model_chat)
-        form.addRow("Reasoner 模型（默认 deepseek-reasoner）", self.model_reasoner)
+        form.addRow("API Base（默认 api.deepseek.com）", self.api_base)
+        form.addRow("API Key (sk-xxxx)", self.api_key)
+        form.addRow("Chat 模型（deepseek-chat）", self.model_chat)
+        form.addRow("Reasoner 模型（deepseek-reasoner）", self.model_reasoner)
         form.addRow("Temperature", self.temperature)
         form.addRow("Max tokens", self.max_tokens)
         form.addRow("Timeout(s)", self.timeout)
@@ -567,7 +545,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addLayout(form)
 
         note = QtWidgets.QLabel(
-            "DeepSeek API 为 OpenAI 兼容格式：base_url=https://api.deepseek.com（或 /v1），接口 /chat/completions。[1](https://api-docs.deepseek.com/)"
+            "DeepSeek API 为 OpenAI 兼容格式。申请地址: [https://platform.deepseek.com/](https://platform.deepseek.com/)"
         )
         note.setStyleSheet("color:#666;")
         layout.addWidget(note)
@@ -604,7 +582,7 @@ class SettingsDialog(QtWidgets.QDialog):
 class ReferencesDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, refs=None):
         super().__init__(parent)
-        self.setWindowTitle("引用管理（占位符 [1][2]…）")
+        self.setWindowTitle("引用管理")
         self.resize(860, 460)
         self.refs = list(refs or [])
 
@@ -614,8 +592,8 @@ class ReferencesDialog(QtWidgets.QDialog):
         self.btn_add = QtWidgets.QPushButton("添加")
         self.btn_edit = QtWidgets.QPushButton("编辑")
         self.btn_del = QtWidgets.QPushButton("删除")
-        self.btn_insert = QtWidgets.QPushButton("插入引用标记到光标处")
-        self.btn_bib = QtWidgets.QPushButton("生成/更新参考文献段落")
+        self.btn_insert = QtWidgets.QPushButton("插入引用标记")
+        self.btn_bib = QtWidgets.QPushButton("生成参考文献段落")
 
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.btn_add)
@@ -696,7 +674,7 @@ class ReferencesDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PaperWriter Ultimate - 一次到位终极版")
+        self.setWindowTitle("PaperWriter Ultimate")
         self.resize(1600, 920)
 
         s = load_settings()
@@ -729,8 +707,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.instructions_edit = QtWidgets.QPlainTextEdit()
         self.instructions_edit.setPlaceholderText("写作要求（可选）：字数=2000; 风格=严谨; 研究对象=高一…")
 
-        self.prefer_reasoner = QtWidgets.QCheckBox("优先用Reasoner（更严谨/更推理）")
-        self.prefer_reasoner.setToolTip("对结构校验、实验研究推理更有帮助；速度可能更慢。")
+        self.prefer_reasoner = QtWidgets.QCheckBox("优先用Reasoner（更严谨）")
 
         # buttons: project
         self.btn_new = QtWidgets.QPushButton("新建")
@@ -779,7 +756,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.node_title = QtWidgets.QLineEdit()
         self.node_notes = QtWidgets.QPlainTextEdit()
         self.node_content = QtWidgets.QPlainTextEdit()
-        self.node_notes.setPlaceholderText("要点/证据/素材（建议写：干预方案、对照组设置、测量工具、统计方法、关键发现等）")
+        self.node_notes.setPlaceholderText("要点/证据/素材")
         self.node_content.setPlaceholderText("该章节草稿（可选）")
 
         # draft
@@ -801,7 +778,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._style()
 
         self._load_project_to_ui()
-        self._log(f"[{now_str()}] 启动完成。DeepSeek API 可选。[1](https://api-docs.deepseek.com/)")
+        self._log(f"[{now_str()}] 启动完成。DeepSeek API 可选。")
 
         # autosave timer
         self.autosave_timer = QtCore.QTimer(self)
@@ -809,6 +786,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.autosave_timer.timeout.connect(self._autosave)
         self.autosave_timer.start()
         QtCore.QTimer.singleShot(600, self._recover_autosave_if_needed)
+
+        # FIX: API Key missing guidance
+        if not self.llm_cfg.api_key:
+            QtCore.QTimer.singleShot(1000, self.prompt_for_api_key)
+
+    def prompt_for_api_key(self):
+        reply = QtWidgets.QMessageBox.question(self, "欢迎", "检测到未配置 API Key。\n\n是否现在配置 DeepSeek API？\n(配置后才可使用AI生成功能)",
+                                               QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.on_settings()
 
     # ---------- log ----------
     def _log(self, msg: str):
@@ -1122,7 +1109,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.llm_cfg = LLMConfig(**data)
             save_settings(data)
             self.client.cfg = self.llm_cfg
-            self._log(f"[{now_str()}] API 设置已保存（DeepSeek）。[1](https://api-docs.deepseek.com/)")
+            self._log(f"[{now_str()}] API 设置已保存。")
 
     # ---------- references ----------
     def on_refs(self):
@@ -1606,7 +1593,32 @@ def run_cli_if_requested():
 
 def main():
     run_cli_if_requested()
+    
+    # === FIX: Linux Input Method Patch ===
+    # 强制设置输入法环境变量，解决 Ubuntu/Fcitx 中文输入无法调出的问题
+    if sys.platform.startswith("linux"):
+        # 尝试检测当前桌面环境或输入法
+        desktop = os.environ.get("XDG_SESSION_DESKTOP", "").lower()
+        im_module = os.environ.get("GTK_IM_MODULE", "")
+        
+        if "QT_IM_MODULE" not in os.environ:
+            # 如果是 Ubuntu 默认环境 (GNOME) 且未显式使用 fcitx，尝试设为 ibus
+            if ("ubuntu" in desktop or "gnome" in desktop) and "fcitx" not in im_module:
+                os.environ["QT_IM_MODULE"] = "ibus"
+            else:
+                # 其他情况或明确使用了 fcitx，则强制设为 fcitx
+                os.environ["QT_IM_MODULE"] = "fcitx"
+        print(f"Linux Patch: QT_IM_MODULE={os.environ.get('QT_IM_MODULE')}")
+    # =====================================
+
     app = QtWidgets.QApplication(sys.argv)
+    
+    # 字体优化（可选）
+    if sys.platform.startswith("linux"):
+        app.setFont(QtGui.QFont("WenQuanYi Micro Hei", 10))
+    else:
+        app.setFont(QtGui.QFont("Microsoft YaHei", 9))
+
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
