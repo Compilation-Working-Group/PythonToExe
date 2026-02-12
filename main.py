@@ -125,7 +125,7 @@ class TextEditor(ctk.CTkFrame):
 # ── 侧边栏文档类型按钮 ──────────────────────────────────────────────────────
 class DocTypeButton(ctk.CTkButton):
     ACTIVE_COLOR   = ("#2B6CB0", "#1A4F8A")   # 深蓝选中
-    INACTIVE_COLOR = ("transparent", "transparent")
+    INACTIVE_COLOR = "transparent"             # 不可用元组包裹 transparent
     HOVER_COLOR    = ("#EBF4FF", "#1E3A5F")
 
     def __init__(self, parent, icon, name, desc, command, **kwargs):
