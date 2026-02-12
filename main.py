@@ -88,7 +88,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         # 水平线
         if re.match(r"^[-*_]{3,}\s*$", stripped):
             p = doc.add_paragraph("─" * 40)
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # 公文层级标题识别
@@ -101,12 +101,12 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             # 根据层级设置字体（3号 = 16磅）
             if level == 1:  # 一、 → 3号黑体
                 _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
-            elif level == 2:  # （一） → 3号楷体_GB2312_GB2312_GB2312
-                _set_run_format(run, font_name='楷体_GB2312_GB2312_GB2312', font_size=Pt(16))
-            else:  # 1. 或 （1） → 3号仿宋_GB2312_GB2312
-                _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            elif level == 2:  # （一） → 3号楷体
+                _set_run_format(run, font_name='楷体', font_size=Pt(16))
+            else:  # 1. 或 （1） → 3号仿宋
+                _set_run_format(run, font_name='仿宋', font_size=Pt(16))
             
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # Markdown 标题级别（#）
@@ -117,13 +117,13 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             p = doc.add_paragraph()
             run = p.add_run(heading_text)
             
-            # 一级标题用黑体，其他用仿宋_GB2312_GB2312
+            # 一级标题用黑体，其他用仿宋
             if level == 1:
                 _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
             else:
-                _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16), bold=True)
+                _set_run_format(run, font_name='仿宋', font_size=Pt(16), bold=True)
             
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # 有序列表
@@ -131,8 +131,8 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if ol_match:
             p = doc.add_paragraph(style="List Number")
             run = p.add_run(_strip_inline(ol_match.group(1)))
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # 无序列表
@@ -140,8 +140,8 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if ul_match:
             p = doc.add_paragraph(style="List Bullet")
             run = p.add_run(_strip_inline(ul_match.group(1)))
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # 引用块
@@ -149,20 +149,20 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Pt(24)
             run = p.add_run(_strip_inline(re.sub(r"^>+\s?", "", stripped)))
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
         # 空行
         if not stripped:
             p = doc.add_paragraph()
-            _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
-        # 普通段落（3号仿宋_GB2312_GB2312，处理行内格式）
+        # 普通段落（3号仿宋，处理行内格式）
         p = doc.add_paragraph()
         _add_inline_runs(p, stripped)
-        _set_paragraph_format(p, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+        _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
 
     doc.save(filepath)
 
@@ -187,27 +187,27 @@ def _add_inline_runs(paragraph, text: str):
     for m in pattern.finditer(text):
         if m.start() > last:
             run = paragraph.add_run(text[last:m.start()])
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
         token = m.group()
         if token.startswith("***") or token.startswith("___"):
             run = paragraph.add_run(token[3:-3])
             run.bold, run.italic = True, True
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
         elif token.startswith("**") or token.startswith("__"):
             run = paragraph.add_run(token[2:-2])
             run.bold = True
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
         elif token.startswith("*") or token.startswith("_"):
             run = paragraph.add_run(token[1:-1])
             run.italic = True
-            _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
         elif token.startswith("`"):
             run = paragraph.add_run(token[1:-1])
             run.font.name = "Courier New"
         last = m.end()
     if last < len(text):
         run = paragraph.add_run(text[last:])
-        _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=Pt(16))
+        _set_run_format(run, font_name='仿宋', font_size=Pt(16))
 
 
 def _match_official_heading(text: str):
@@ -238,7 +238,7 @@ def _match_official_heading(text: str):
     return None
 
 
-def _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=None, bold=False):
+def _set_run_format(run, font_name='仿宋', font_size=None, bold=False):
     """设置文本运行的字体格式"""
     from docx.oxml.ns import qn
     from docx.shared import RGBColor
@@ -252,7 +252,7 @@ def _set_run_format(run, font_name='仿宋_GB2312_GB2312_GB2312', font_size=None
     run.font.color.rgb = RGBColor(0, 0, 0)
 
 
-def _set_paragraph_format(paragraph, font_name='仿宋_GB2312_GB2312_GB2312', font_size=None):
+def _set_paragraph_format(paragraph, font_name='仿宋', font_size=None):
     """设置段落格式：28磅固定行距"""
     from docx.enum.text import WD_LINE_SPACING
     from docx.shared import Pt
