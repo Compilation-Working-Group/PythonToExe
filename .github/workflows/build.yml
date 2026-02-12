@@ -136,6 +136,10 @@ jobs:
             --hidden-import PIL._tkinter_finder \
             --collect-submodules anthropic \
             main.py
+          chmod +x dist/AI-Writer
+          printf '#!/bin/bash\ncd "$(dirname "$0")"\nchmod +x ./AI-Writer\n./AI-Writer\n' > dist/run.sh
+          chmod +x dist/run.sh
+          printf 'AI 写作助手 Linux 使用说明\n==========================\n推荐: 双击 run.sh 运行\n终端: ./AI-Writer\n如报错缺 Tk 库: sudo apt-get install python3-tk\n' > dist/README.txt
 
       # ── 验证构建产物 ────────────────────────────────────────────────────
       - name: ✅ Verify Build Output
