@@ -10,7 +10,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-      # 允许其他平台继续运行，即使某个失败
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -34,8 +33,9 @@ jobs:
           pip install pyinstaller
 
       - name: Build with PyInstaller
+        shell: bash  # 统一使用 bash，Windows 自带 Git Bash
         run: |
-          EXTRA_ARGS="--onefile --collect-all customtkinter"
+          EXTRA_ARGS="--onefile --collect-all customtkinter --collect-all python-docx --collect-all pillow"
           if [ "${{ runner.os }}" != "Linux" ]; then
             EXTRA_ARGS="$EXTRA_ARGS --windowed"
           fi
