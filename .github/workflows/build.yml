@@ -107,6 +107,8 @@ jobs:
             --hidden-import anthropic `
             --collect-submodules anthropic `
             --collect-submodules openai `
+            --hidden-import docx `
+            --collect-submodules docx `
             main.py
 
       # ── 构建 macOS 应用 ─────────────────────────────────────────────────
@@ -126,6 +128,8 @@ jobs:
             --hidden-import anthropic \
             --collect-submodules anthropic \
             --collect-submodules openai \
+            --hidden-import docx \
+            --collect-submodules docx \
             main.py
 
       # ── 构建 Linux 可执行文件 ──────────────────────────────────────────
@@ -144,6 +148,8 @@ jobs:
             --hidden-import anthropic \
             --collect-submodules anthropic \
             --collect-submodules openai \
+            --hidden-import docx \
+            --collect-submodules docx \
             main.py
 
       # ── 验证构建产物 ────────────────────────────────────────────────────
