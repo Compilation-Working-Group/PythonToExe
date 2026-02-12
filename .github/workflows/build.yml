@@ -15,9 +15,6 @@ permissions:
   contents: write
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────
-  # 多平台构建矩阵
-  # ─────────────────────────────────────────────────────────────────────────
   build:
     name: Build · ${{ matrix.label }}
     strategy:
@@ -42,18 +39,15 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      # ── 拉取代码 ────────────────────────────────────────────────────────
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      # ── Python 环境 ─────────────────────────────────────────────────────
       - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── Linux 系统依赖 ──────────────────────────────────────────────────
       - name: 📦 Install System Dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -65,16 +59,16 @@ jobs:
             libxrender1 \
             libxext6 \
             libx11-dev \
-            libxkbcommon-x11-0
+            libxkbcommon-x11-0 \
+            libxml2-dev \
+            libxslt-dev
 
-      # ── Python 依赖 ─────────────────────────────────────────────────────
       - name: 📦 Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ── 获取 customtkinter 数据路径 (Unix) ─────────────────────────────
       - name: 🔍 Locate customtkinter Data (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
@@ -82,7 +76,6 @@ jobs:
           CTK_PATH=$(python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
           echo "CTK_PATH=$CTK_PATH" >> $GITHUB_ENV
 
-      # ── 获取 customtkinter 数据路径 (Windows) ───────────────────────────
       - name: 🔍 Locate customtkinter Data (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -90,7 +83,7 @@ jobs:
           $ctk = python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))"
           echo "CTK_PATH=$ctk" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      # ── 构建 Windows 可执行文件 ─────────────────────────────────────────
+      # ── Windows 构建 (使用 PowerShell 反引号 ` 换行) ──
       - name: 🔨 Build (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -103,15 +96,13 @@ jobs:
             --hidden-import customtkinter `
             --hidden-import PIL `
             --hidden-import PIL._tkinter_finder `
-            --hidden-import openai `
-            --hidden-import anthropic `
-            --collect-submodules anthropic `
-            --collect-submodules openai `
-            --hidden-import docx `
-            --collect-submodules docx `
+            --collect-all anthropic `
+            --collect-all openai `
+            --collect-all docx `
+            --hidden-import lxml `
             main.py
 
-      # ── 构建 macOS 应用 ─────────────────────────────────────────────────
+      # ── macOS 构建 (使用 Bash 反斜杠 \ 换行) ──
       - name: 🔨 Build (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -124,15 +115,13 @@ jobs:
             --hidden-import customtkinter \
             --hidden-import PIL \
             --hidden-import PIL._tkinter_finder \
-            --hidden-import openai \
-            --hidden-import anthropic \
-            --collect-submodules anthropic \
-            --collect-submodules openai \
-            --hidden-import docx \
-            --collect-submodules docx \
+            --collect-all anthropic \
+            --collect-all openai \
+            --collect-all docx \
+            --hidden-import lxml \
             main.py
 
-      # ── 构建 Linux 可执行文件 ──────────────────────────────────────────
+      # ── Linux 构建 (使用 Bash 反斜杠 \ 换行) ──
       - name: 🔨 Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
@@ -144,22 +133,18 @@ jobs:
             --hidden-import customtkinter \
             --hidden-import PIL \
             --hidden-import PIL._tkinter_finder \
-            --hidden-import openai \
-            --hidden-import anthropic \
-            --collect-submodules anthropic \
-            --collect-submodules openai \
-            --hidden-import docx \
-            --collect-submodules docx \
+            --collect-all anthropic \
+            --collect-all openai \
+            --collect-all docx \
+            --hidden-import lxml \
             main.py
 
-      # ── 验证构建产物 ────────────────────────────────────────────────────
       - name: ✅ Verify Build Output
         shell: bash
         run: |
           echo "=== dist/ contents ==="
           ls -lh dist/ || dir dist\\
 
-      # ── 上传构建产物 ────────────────────────────────────────────────────
       - name: 📤 Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -167,9 +152,6 @@ jobs:
           path: dist/
           retention-days: 30
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # 创建 GitHub Release（仅在推送 Tag 时触发）
-  # ─────────────────────────────────────────────────────────────────────────
   release:
     name: 🎉 Create GitHub Release
     needs: build
@@ -204,27 +186,5 @@ jobs:
             AI-Writer-macOS.zip
             AI-Writer-Linux.zip
           generate_release_notes: true
-          body: |
-            ## 🚀 AI 写作助手 ${{ github.ref_name }}
-
-            ### ✨ 功能特性
-            - 支持 **学术论文、研究报告、工作计划、反思总结、案例分析、工作总结** 等文稿类型
-            - 智能生成可编辑大纲，支持手动调整后一键撰写完整正文
-            - 基于 Anthropic Claude API，支持流式输出实时显示
-            - 支持导出为 Markdown / TXT 格式
-
-            ### 💻 平台支持
-            | 平台 | 文件 | 说明 |
-            |------|------|------|
-            | Windows | `AI-Writer-Windows.zip` | 解压后运行 `AI-Writer.exe` |
-            | macOS   | `AI-Writer-macOS.zip`   | 解压后运行 `AI-Writer`，如提示不可信请右键-打开 |
-            | Linux   | `AI-Writer-Linux.zip`   | 解压后 `chmod +x AI-Writer && ./AI-Writer` |
-
-            ### 🔑 使用说明
-            1. 前往 [console.anthropic.com](https://console.anthropic.com) 获取 API Key
-            2. 打开软件，在左侧「Anthropic API Key」栏填入并保存
-            3. 选择文稿类型 → 输入题目 → 生成大纲 → 编辑大纲 → 开始撰写
-
-            ${{ github.event.inputs.release_note }}
           draft: false
           prerelease: false
