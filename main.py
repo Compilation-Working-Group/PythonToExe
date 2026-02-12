@@ -6,7 +6,7 @@ import re
 from tkinter import filedialog, messagebox
 from docx import Document
 
-# Onefile 模式下资源路径修复（Linux 必须）
+# Onefile 模式资源路径修复
 if getattr(sys, 'frozen', False):
     application_path = os.path.dirname(sys.executable)
     os.chdir(application_path)
@@ -17,14 +17,14 @@ ctk.set_default_color_theme("blue")
 class WritingAssistant(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("AI 写作助手 Pro - 论文/计划/反思/总结/自定义")
+        self.title("AI 写作助手 Pro")
         self.geometry("1300x980")
         self.client = None
 
         self.create_widgets()
 
     def create_widgets(self):
-        # API 设置区
+        # API 设置区（保持不变）
         api_frame = ctk.CTkFrame(self)
         api_frame.pack(pady=10, padx=20, fill="x")
 
@@ -39,8 +39,7 @@ class WritingAssistant(ctk.CTk):
 
         ctk.CTkLabel(api_frame, text="模型:").grid(row=0, column=4, padx=5, pady=5, sticky="w")
         self.model_combo = ctk.CTkComboBox(api_frame, width=200, values=[
-            "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "claude-3-5-sonnet-20241022",
-            "llama3-70b-8192", "grok-beta", "deepseek-chat"
+            "gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022", "llama3-70b-8192", "grok-beta"
         ])
         self.model_combo.set("gpt-4o-mini")
         self.model_combo.grid(row=0, column=5, padx=5, pady=5)
@@ -59,7 +58,7 @@ class WritingAssistant(ctk.CTk):
         self.type_combo.grid(row=0, column=1, padx=5, pady=5)
 
         ctk.CTkLabel(input_frame, text="题目/主题:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        self.title_entry = ctk.CTkEntry(input_frame, width=380)
+        self.title_entry = ctk.CTkEntry(input_frame, width=400)
         self.title_entry.grid(row=0, column=3, padx=5, pady=5)
 
         ctk.CTkLabel(input_frame, text="目标字数:").grid(row=0, column=4, padx=5, pady=5, sticky="w")
@@ -68,22 +67,21 @@ class WritingAssistant(ctk.CTk):
 
         ctk.CTkButton(input_frame, text="生成大纲", command=self.generate_outline).grid(row=0, column=6, padx=10, pady=5)
 
-        # 新增：额外内容与格式要求
+        # 额外要求区
         extra_frame = ctk.CTkFrame(self)
         extra_frame.pack(pady=8, padx=20, fill="x")
-
         ctk.CTkLabel(extra_frame, text="额外内容要求（可选）:").pack(anchor="w", padx=10)
         self.extra_content = ctk.CTkTextbox(extra_frame, height=55)
         self.extra_content.pack(fill="x", padx=10, pady=4)
 
-        ctk.CTkLabel(extra_frame, text="额外格式要求（可选，例如：使用GB/T 7714引用、摘要300字以内、双栏排版等）:").pack(anchor="w", padx=10)
+        ctk.CTkLabel(extra_frame, text="额外格式要求（可选）:").pack(anchor="w", padx=10)
         self.extra_format = ctk.CTkTextbox(extra_frame, height=55)
         self.extra_format.pack(fill="x", padx=10, pady=4)
 
         # 参考文献
         refs_frame = ctk.CTkFrame(self)
         refs_frame.pack(pady=10, padx=20, fill="x")
-        ctk.CTkLabel(refs_frame, text="附加参考文献或材料（可选，会自动引用）:").pack(anchor="w", padx=10)
+        ctk.CTkLabel(refs_frame, text="附加参考文献或材料（可选）:").pack(anchor="w", padx=10)
         self.refs_text = ctk.CTkTextbox(refs_frame, height=80)
         self.refs_text.pack(fill="x", padx=10, pady=5)
 
@@ -172,7 +170,7 @@ class WritingAssistant(ctk.CTk):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.75,
+                temperature=0.7,
                 max_tokens=max_tokens
             )
             content = response.choices[0].message.content.strip()
@@ -181,28 +179,41 @@ class WritingAssistant(ctk.CTk):
         except Exception as e:
             messagebox.showerror("生成失败", str(e))
 
+    # ==================== 核心修复：加强题目约束 ====================
     def build_prompt(self, writing_type, title, is_outline, outline=None, refs=None,
                      extra_content=None, extra_format=None, word_count=None, custom=None):
-        refs_part = f"\n\n附加参考材料（请在合适位置规范引用）:\n{refs}" if refs else ""
-        word_part = f"\n全文严格控制在约 {word_count} 字左右（含标点符号）。" if word_count and word_count.isdigit() else ""
+        
+        refs_part = f"\n\n附加参考材料：\n{refs}" if refs else ""
+        word_part = f"\n全文严格控制在约 {word_count} 字左右。" if word_count and word_count.isdigit() else ""
         content_part = f"\n额外内容要求：{extra_content}" if extra_content else ""
         format_part = f"\n额外格式要求：{extra_format}" if extra_format else ""
 
-        base = {
-            "期刊论文": "请为题目《{title}》撰写一篇完整的学术期刊论文，语言正式、逻辑严谨、学术规范。",
-            "项目计划": "请为项目《{title}》撰写一份完整的项目执行计划书，内容专业、结构清晰。",
-            "个人反思": "请针对《{title}》撰写一篇深入、真挚的个人反思文章。",
-            "案例分析": "请对案例《{title}》撰写一份完整的案例分析报告，分析深入透彻。",
-            "工作总结": "请为《{title}》撰写一份客观详实的工作总结报告。",
-            "自定义": custom or title
-        }[writing_type]
-
+        # 核心修复：把真实题目强行放在最前面，并多次强调
         if is_outline:
-            return f"{base} 请先生成详细的大纲，使用编号层次结构，每节给出简要描述。"
-        else:
-            return f"{base} 严格按照以下大纲撰写，每节内容充实：\n\n{outline}{word_part}{content_part}{format_part}{refs_part}"
+            return f"""你现在是一位专业的学术/专业写作助手。
+请严格围绕题目《{title}》生成详细大纲。
+要求：使用中文，层次清晰，用数字编号，每节给出简要描述。"""
 
-    # Markdown 清理函数（关键优化）
+        else:
+            return f"""你现在是一位专业的学术/专业写作助手。
+请**严格按照**以下要求撰写内容：
+
+**题目**：{title}
+
+**写作类型**：{writing_type}
+
+**大纲**（必须严格遵守，不得增减或改变顺序）：
+{outline}
+
+{word_part}{content_part}{format_part}{refs_part}
+
+重要指令：
+1. 全文必须紧紧围绕题目《{title}》展开，绝对不能跑题。
+2. 所有内容都要服务于该题目，不允许写无关内容。
+3. 语言正式、专业、逻辑严密。
+4. 严格按照上面给出的大纲结构撰写。"""
+
+    # Markdown 清理函数（保持不变）
     def clean_markdown(self, text):
         text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
         text = re.sub(r'(\*\*|__)(.+?)\1', r'\2', text)
@@ -215,19 +226,15 @@ class WritingAssistant(ctk.CTk):
 
     def export_word(self):
         raw_text = self.result_text.get("1.0", "end").strip()
-        if not raw_text:
-            return
+        if not raw_text: return
         file = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文件", "*.docx")])
         if file:
             doc = Document()
             doc.add_heading(self.title_entry.get() or "未命名文档", level=0)
-
             clean_text = self.clean_markdown(raw_text)
             for para in clean_text.split("\n\n"):
                 if para.strip():
-                    p = doc.add_paragraph(para.strip())
-                    p.style = 'Normal'
-
+                    doc.add_paragraph(para.strip())
             doc.save(file)
             messagebox.showinfo("导出成功", f"已保存纯文本 Word 文件：\n{file}")
 
