@@ -3,7 +3,7 @@
 AI 写作助手 - 智能文稿创作平台
 支持 Anthropic Claude、DeepSeek、OpenAI 及自定义兼容接口
 支持学术论文、研究报告、工作计划、反思总结、案例分析、工作总结及自定义文稿
-版本：v2.4.1 (智能层级校准版)
+版本：v2.4.2 (结构重排最终版)
 """
 
 import customtkinter as ctk
@@ -37,7 +37,6 @@ def to_chinese_num(n):
 
 # ── Markdown 转纯文本工具 ────────────────────────────────────────────────────
 def md_to_plain(text: str) -> str:
-    """将 Markdown 文本转换为干净的纯文本"""
     text = re.sub(r"```[\s\S]*?```", lambda m: m.group().replace("```", "").strip(), text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
@@ -58,6 +57,7 @@ def md_to_plain(text: str) -> str:
 def save_as_docx(filepath: str, title: str, md_text: str):
     """
     将 Markdown 转换为严格符合《党政机关公文格式》标准的 Word 文档
+    核心修复：强制将摘要和关键词移动到文档开头
     """
     doc = Document()
 
@@ -79,7 +79,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         run.font.bold = bold
         run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 修改默认样式 'Normal' 为公文正文样式
+    # 修改默认样式 'Normal'
     style_normal = doc.styles['Normal']
     style_normal.font.name = 'Times New Roman'
     style_normal.element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
@@ -98,74 +98,90 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     run_title = head_p.add_run(title)
     set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
 
-    # ── 4. 智能去重与层级分析 (核心修复逻辑) ──
+    # ── 4. 内容预处理：去重 & 结构重排 ──
     
-    # 辅助函数：清洗行内容以进行比对
+    # 4.1 初步清洗
     def clean_text_for_comparison(text):
         t = re.sub(r"^[#\*\-1-9一二三四五六七八九十\.\、\s]+", "", text)
         t = re.sub(r"[^\w\u4e00-\u9fa5]", "", t)
         return t.strip()
 
     title_clean = clean_text_for_comparison(title)
-    lines = md_text.splitlines()
+    raw_lines = md_text.splitlines()
     
-    # 第一遍扫描：确定最小标题层级 (用于自动升舱)
-    min_header_level = 6
-    has_headers = False
+    abstract_lines = []
+    keyword_lines = []
+    body_lines = []
     
-    valid_lines = [] # 存储去重后的行
+    # 状态机：捕获摘要和关键词
+    current_block = "body" # body, abstract, keywords
     
-    for line in lines:
+    # 4.2 扫描并分类行
+    for line in raw_lines:
         stripped = line.strip()
         if not stripped: continue
         if re.match(r"^[-*_]{3,}\s*$", stripped): continue
 
-        # 智能去重：如果该行是标题的重复，跳过
+        # 智能去重：如果是重复的大标题，直接丢弃
         current_line_clean = clean_text_for_comparison(stripped)
         similarity = 0.0
         if title_clean and current_line_clean:
             similarity = difflib.SequenceMatcher(None, title_clean, current_line_clean).ratio()
         
-        # 判定为重复标题
         is_duplicate = False
-        if similarity > 0.8: 
-            is_duplicate = True
+        if similarity > 0.8: is_duplicate = True
         elif title_clean and current_line_clean and (title_clean in current_line_clean or current_line_clean in title_clean):
              if len(current_line_clean) > 4: is_duplicate = True
         
-        if is_duplicate:
-            continue
-            
-        valid_lines.append(stripped)
+        if is_duplicate: continue
+
+        # 识别特殊段落开头
+        clean_check = re.sub(r"^[#\s]+", "", stripped)
+        clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?\s*", "", clean_check).strip()
         
-        # 检查标题层级
-        heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
-        if heading_match:
-            level = len(heading_match.group(1))
-            if level < min_header_level:
-                min_header_level = level
-            has_headers = True
+        if clean_check.startswith("摘要") or clean_check.startswith("Abstract"):
+            current_block = "abstract"
+            abstract_lines.append(stripped)
+            continue
+        elif clean_check.startswith("关键词") or clean_check.startswith("Keywords"):
+            current_block = "keywords"
+            keyword_lines.append(stripped)
+            continue
+        # 如果遇到像标题一样的行，切回 body 模式（防止摘要把正文吞了）
+        elif re.match(r"^(#{1,6}|[一二三四五六七八九十]+、|1\.)", stripped) and current_block in ["abstract", "keywords"]:
+             current_block = "body"
+        
+        # 根据当前状态分配行
+        if current_block == "abstract":
+            abstract_lines.append(stripped)
+        elif current_block == "keywords":
+            keyword_lines.append(stripped)
+        else:
+            body_lines.append(stripped)
 
-    # 计算层级偏移量：如果最小层级是 2 (##)，则 offset = 1，所有标题升级
-    level_offset = 0
-    if has_headers and min_header_level > 1:
-        level_offset = min_header_level - 1
+    # 4.3 重组顺序：摘要 -> 关键词 -> 正文
+    final_lines = abstract_lines + keyword_lines + body_lines
 
-    # ── 5. 正式转换 ──
+    # ── 5. 正文解析与写入 ──
     h1_counter = 0
     h2_counter = 0
     h3_counter = 0
     
-    for stripped in valid_lines:
-        
-        # 预处理：剥离列表符号 (1. *)
-        is_list_item = False
-        list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
-        if list_match:
-            is_list_item = True
-            stripped = list_match.group(2)
+    # 预扫描最小层级（自动升舱逻辑）
+    min_header_level = 6
+    has_headers = False
+    for line in body_lines:
+        if re.match(r"^(#{1,6})\s+(.*)", line):
+            level = len(re.match(r"^(#{1,6})", line).group(1))
+            if level < min_header_level: min_header_level = level
+            has_headers = True
+    level_offset = 0
+    if has_headers and min_header_level > 1:
+        level_offset = min_header_level - 1
 
-        # 特殊段落拦截 (摘要、关键词)
+    for stripped in final_lines:
+        # 特殊段落拦截 (摘要、关键词、参考文献、结语)
+        # 注意：摘要和关键词虽然已经在前面排好序了，这里依然需要识别它们以应用特殊格式
         clean_check = re.sub(r"^[#\s]+", "", stripped)
         clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?\s*", "", clean_check).strip()
         special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References", "结语"]
@@ -184,30 +200,28 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 sep = "：" if "：" in clean_check else ":"
                 parts = clean_check.split(sep, 1)
                 run_head = p.add_run(parts[0] + "：")
-                set_run_font(run_head, '黑体', size_pt=16, bold=False) 
+                set_run_font(run_head, '黑体', size_pt=16, bold=False) # 摘要头加黑
                 run_body = p.add_run(parts[1])
                 set_run_font(run_body, '仿宋_GB2312', size_pt=16, bold=False)
             else:
                 run = p.add_run(clean_check)
-                set_run_font(run, '黑体', size_pt=16, bold=False)
+                set_run_font(run, '黑体', size_pt=16, bold=False) # 纯标题加黑
             continue
 
         # 标题解析
         heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
         if heading_match:
             original_level = len(heading_match.group(1))
-            # 【关键】应用层级偏移：自动升舱
-            level = max(1, original_level - level_offset)
+            level = max(1, original_level - level_offset) # 自动升舱
             
             raw_text = heading_match.group(2)
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
             text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
-            text_content = _strip_inline(text_content)
+            text_content = _strip_inline(text_content) 
 
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
             
-            # 一级标题：一、 (黑体)
             if level == 1:
                 h1_counter += 1
                 h2_counter = 0; h3_counter = 0
@@ -215,8 +229,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 num_str = to_chinese_num(h1_counter)
                 run = p.add_run(f"{num_str}、{text_content}")
                 set_run_font(run, '黑体', size_pt=16) 
-
-            # 二级标题：（一） (楷体)
             elif level == 2:
                 h2_counter += 1
                 h3_counter = 0
@@ -224,8 +236,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 num_str = to_chinese_num(h2_counter)
                 run = p.add_run(f"（{num_str}）{text_content}")
                 set_run_font(run, '楷体_GB2312', size_pt=16, bold=True)
-
-            # 三级标题：1. (仿宋加粗)
             elif level >= 3:
                 h3_counter += 1
                 p.paragraph_format.first_line_indent = Pt(32)
@@ -233,11 +243,16 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 set_run_font(run, '仿宋_GB2312', size_pt=16, bold=True)
             continue
 
-        # 普通段落
+        # 普通段落 (剥离列表符号)
+        is_list_item = False
+        list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
+        if list_match:
+            stripped = list_match.group(2)
+
         p = doc.add_paragraph()
         _add_inline_runs_styled(p, stripped)
 
-    # ── 5. 页码设置 ──
+    # ── 6. 页码设置 ──
     def create_page_number_xml(run):
         fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
         run._element.append(fldChar1)
@@ -260,7 +275,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
 
 def _strip_inline(text: str) -> str:
-    """彻底去掉行内 Markdown 符号"""
     text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
     text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
@@ -269,7 +283,6 @@ def _strip_inline(text: str) -> str:
 
 
 def _add_inline_runs_styled(paragraph, text: str):
-    """解析 Markdown 行内格式并应用到 Docx Run"""
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
     
@@ -319,7 +332,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.4.1"  # Final polished version
+APP_VERSION = "v2.4.2"  # Final polished version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -371,7 +384,7 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 动态提示词系统 (修复层级) ────────────────────────────────────────────────
+# ── 动态提示词系统 ──────────────────────────────────────────────────────────
 def get_system_prompts(doc_type, user_req=""):
     """根据文稿类型和用户要求动态生成 System Prompt"""
     if doc_type == "自定义":
@@ -406,12 +419,14 @@ def get_system_prompts(doc_type, user_req=""):
     if doc_type == "自定义":
         writing_sys += (
             "【撰写原则】\n"
-            "1. **严格控制字数**：必须符合用户指定的字数限制。\n"
-            "2. **风格适配**：严格采用用户要求的语体风格。\n"
-            "3. **结构分明**：请务必使用 Markdown 的一级标题（#）来划分文章章节（如“一、现状”、“二、对策”）。\n"
-            "   - **注意**：即使是写一般文章，也请使用一级标题起手，不要直接用二级标题（##）。\n"
-            "4. **禁止手动编号**：标题前不要加“1.”、“一、”等序号，由排版软件自动生成。\n"
-            "5. **严禁在摘要前添加任何标题**。\n"
+            "1. **结构均衡**：正文必须包含 **至少3个** 一级标题（使用 # 标记），例如“一、问题”、“二、分析”、“三、对策”。\n"
+            "   - 严禁将全文所有内容都塞进同一个一级标题下面！\n"
+            "2. **层级规范**：\n"
+            "   - 一级章节用 Markdown 的 **#**。\n"
+            "   - 子章节用 **##**。\n"
+            "3. **禁止手动编号**：标题前不要加“1.”、“一、”等序号，由排版软件自动生成。\n"
+            "4. **严禁在摘要前添加任何标题**：输出顺序必须严格为：\n"
+            "   [题目] -> [摘要](如有) -> [关键词](如有) -> [正文内容(从#开始)]\n"
         )
     else:
         writing_sys += (
