@@ -1,13 +1,14 @@
 import sys
 import os
 
-# --- 针对 Linux/PyInstaller 兼容性的强制导入 ---
+# --- 兼容性修复 ---
+# 即使 Pillow 降级了，保留这个 Try-Catch 也是一种防御性编程，防止未来环境差异报错
 try:
     import PIL._tkinter_finder
 except ImportError:
     pass
-import PIL.ImageTk  # 显式引入，防止运行时图片库报错
-# -------------------------------------------------------
+import PIL.ImageTk 
+# -----------------
 
 import threading
 import json
@@ -23,57 +24,53 @@ from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 
-# --- 字体自动适配 (防止Linux乱码) ---
+# --- 字体自动适配 ---
 DEFAULT_FONT = "Helvetica"
 SYSTEM_PLATFORM = sys.platform
 if SYSTEM_PLATFORM.startswith('win'):
     MAIN_FONT_NAME = "微软雅黑"
     UI_FONT_SIZE = 9
-elif SYSTEM_PLATFORM.startswith('darwin'): # macOS
+elif SYSTEM_PLATFORM.startswith('darwin'): 
     MAIN_FONT_NAME = "PingFang SC"
     UI_FONT_SIZE = 11
-else: # Linux
-    MAIN_FONT_NAME = "WenQuanYi Micro Hei" # Linux 常用中文字体
+else: 
+    MAIN_FONT_NAME = "WenQuanYi Micro Hei" 
     UI_FONT_SIZE = 10
 
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        super().__init__(themename="superhero") # 深色主题
+        super().__init__(themename="superhero") 
         self.title("金塔县中学教案智能生成系统 v3.0 (Final)")
         self.geometry("1350x950")
         
-        # 核心数据存储
         self.lesson_data = {} 
         self.active_period = 1 
         
-        # 状态变量
         self.is_generating = False
         self.stop_flag = False
         self.api_key_var = tk.StringVar()
         self.total_periods_var = tk.IntVar(value=1)
         self.current_period_disp_var = tk.StringVar(value="1")
         
-        # 作者信息
         self.author_info = "设计与开发：金塔县中学化学教研组 · 于金全 (Yu JinQuan) | 核心驱动：DeepSeek-V3"
         
         self.setup_ui()
         self.save_current_data_to_memory(1)
 
     def setup_ui(self):
-        # ================= 顶部控制区 (Header) =================
+        # ================= 顶部控制区 =================
         header_frame = ttk.Frame(self, padding=(15, 15))
         header_frame.pack(fill=X)
         
-        # 1. API 设置
+        # API 设置
         api_frame = ttk.Labelframe(header_frame, text="🔑 授权设置", padding=10, bootstyle="info")
         api_frame.pack(side=LEFT, fill=Y, padx=(0, 10))
         ttk.Entry(api_frame, textvariable=self.api_key_var, show="*", width=20, bootstyle="info").pack()
 
-        # 2. 课题与进度
+        # 课题与进度
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
         topic_frame.pack(side=LEFT, fill=Y, expand=True, fill=X, padx=5)
         
-        # 第一行：课题
         f1 = ttk.Frame(topic_frame)
         f1.pack(fill=X, pady=(0, 5))
         ttk.Label(f1, text="课题名称:", font=(MAIN_FONT_NAME, UI_FONT_SIZE, "bold")).pack(side=LEFT)
@@ -86,7 +83,6 @@ class LessonPlanWriter(ttk.Window):
         self.type_combo.current(0)
         self.type_combo.pack(side=LEFT)
 
-        # 第二行：课时控制
         f2 = ttk.Frame(topic_frame)
         f2.pack(fill=X)
         ttk.Label(f2, text="总课时:", font=(MAIN_FONT_NAME, UI_FONT_SIZE)).pack(side=LEFT)
@@ -103,7 +99,7 @@ class LessonPlanWriter(ttk.Window):
         self.period_combo.bind("<<ComboboxSelected>>", self.handle_period_switch)
         ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
 
-        # 3. 全局操作区
+        # 全局操作区
         action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
         action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
         
@@ -111,22 +107,19 @@ class LessonPlanWriter(ttk.Window):
         ttk.Button(action_frame, text="🗑️ 清空所有数据", command=self.clear_all_data, bootstyle="danger outline").pack(fill=X, pady=2)
         ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
 
-        # ================= 中间主体 (Body) =================
-        # Linux下必须用 Panedwindow (小写w)
+        # ================= 中间主体 =================
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
         
-        # --- 左侧：设计框架 ---
+        # 左侧框架
         left_frame = ttk.Labelframe(main_pane, text="1. 教学设计框架 (AI辅助)", padding=10, bootstyle="info")
         main_pane.add(left_frame, weight=1)
         
-        # 滚动区域
         left_canvas = tk.Canvas(left_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=left_canvas.yview)
         self.scrollable_frame = ttk.Frame(left_canvas)
         self.scrollable_frame.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
         
-        # 宽度自适应 Hack
         left_canvas_window = left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         def configure_canvas(event):
             left_canvas.itemconfig(left_canvas_window, width=event.width)
@@ -140,14 +133,13 @@ class LessonPlanWriter(ttk.Window):
         font_bold = (MAIN_FONT_NAME, UI_FONT_SIZE, "bold")
         font_norm = (MAIN_FONT_NAME, UI_FONT_SIZE)
 
-        # ★ 自定义内容区
+        # 自定义内容区
         custom_frame = ttk.LabelFrame(self.scrollable_frame, text="★ 本课时自定义教学内容 (可选)", padding=5, bootstyle="danger")
         custom_frame.pack(fill=X, pady=(0, 10))
         ttk.Label(custom_frame, text="若填写，AI将严格围绕此内容设计；若留空，则自动规划。", font=(MAIN_FONT_NAME, UI_FONT_SIZE-1), bootstyle="secondary").pack(anchor=W)
         self.fields['custom_content'] = tk.Text(custom_frame, height=3, font=font_norm, bg="#fff0f0", fg="#000")
         self.fields['custom_content'].pack(fill=X, pady=2)
         
-        # 常规字段
         labels = [
             ("📖 章节名称", "chapter", 1),
             ("🎯 素养导向目标 (新课标)", "objectives", 7),
@@ -166,11 +158,10 @@ class LessonPlanWriter(ttk.Window):
         
         ttk.Button(left_frame, text="⚡ 生成当前课时框架", command=self.generate_framework, bootstyle="info").pack(fill=X, pady=5)
 
-        # --- 右侧：过程撰写 ---
+        # 右侧过程
         right_frame = ttk.Labelframe(main_pane, text="2. 教学过程与活动 (40分钟)", padding=10, bootstyle="success")
         main_pane.add(right_frame, weight=2)
         
-        # 指令区
         cmd_frame = ttk.Frame(right_frame)
         cmd_frame.pack(fill=X, pady=5)
         ttk.Label(cmd_frame, text="💬 额外指令:", font=font_bold).pack(side=LEFT)
@@ -178,11 +169,9 @@ class LessonPlanWriter(ttk.Window):
         self.instruction_entry.pack(side=LEFT, fill=X, expand=True, padx=5)
         self.instruction_entry.insert(0, "环节清晰，体现学生探究，师生互动具体")
 
-        # 主文本框
         self.process_text = ScrolledText(right_frame, font=(MAIN_FONT_NAME, 11), padding=10)
         self.process_text.pack(fill=BOTH, expand=True, pady=5)
         
-        # 底部控制区
         ctrl_frame = ttk.Frame(right_frame)
         ctrl_frame.pack(fill=X, pady=5)
         
@@ -190,7 +179,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Button(ctrl_frame, text="🛑 停止", command=self.stop_generation, bootstyle="danger").pack(side=LEFT, padx=5)
         ttk.Button(ctrl_frame, text="🧹 清空当前页", command=self.clear_current, bootstyle="secondary outline").pack(side=LEFT, padx=5)
 
-        # ================= 底部状态栏 (Footer) =================
+        # 底部状态栏
         footer_frame = ttk.Frame(self, bootstyle="light")
         footer_frame.pack(fill=X, side=BOTTOM)
         
@@ -247,13 +236,11 @@ class LessonPlanWriter(ttk.Window):
                 self.process_text.insert("1.0", data['process'])
 
     def clean_text(self, text):
-        """清洗Markdown和多余符号"""
         text = text.replace("**", "").replace("__", "")
         text = text.replace("```json", "").replace("```", "")
         lines = []
         for line in text.split('\n'):
             clean_line = line.strip()
-            # 移除行首的标题符号 #
             while clean_line.startswith("#"):
                 clean_line = clean_line[1:].strip()
             lines.append(clean_line)
@@ -280,13 +267,12 @@ class LessonPlanWriter(ttk.Window):
 
     def clear_all_data(self):
         if messagebox.askyesno("危险操作", "确定要清空【所有课时】的所有数据吗？\n此操作不可恢复！"):
-            self.lesson_data = {} # 重置数据
+            self.lesson_data = {} 
             self.active_period = 1
             self.total_periods_var.set(1)
             self.period_combo['values'] = [1]
             self.period_combo.current(0)
             
-            # 清空UI
             for key in self.fields:
                 self.fields[key].delete("1.0", END)
             self.process_text.delete("1.0", END)
@@ -437,14 +423,12 @@ class LessonPlanWriter(ttk.Window):
             self.is_generating = False
 
     def export_word(self):
-        # 强制保存当前页
         self.save_current_data_to_memory(self.active_period)
         filename = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
         if not filename: return
 
         try:
             doc = Document()
-            # 设置中文字体
             doc.styles['Normal'].font.name = u'宋体'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
