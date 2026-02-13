@@ -21,6 +21,17 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
+# ── 辅助工具：数字转汉字 ──────────────────────────────────────────────────────
+def to_chinese_num(n):
+    """将阿拉伯数字 1-99 转换为汉字（用于一级标题）"""
+    chars = "零一二三四五六七八九十"
+    if 0 < n <= 10:
+        return chars[n]
+    elif 10 < n < 20:
+        return "十" + chars[n % 10]
+    elif 20 <= n < 100:
+        return chars[n // 10] + "十" + (chars[n % 10] if n % 10 != 0 else "")
+    return str(n)
 
 # ── Markdown 转纯文本工具 ────────────────────────────────────────────────────
 def md_to_plain(text: str) -> str:
@@ -41,16 +52,16 @@ def md_to_plain(text: str) -> str:
     return text.strip()
 
 
-# ── 公文格式化保存核心逻辑 ────────────────────────────────────────────────────
+# ── 公文格式化保存核心逻辑 (Strict GB/T 9704-2012) ────────────────────────────
 def save_as_docx(filepath: str, title: str, md_text: str):
     """
-    将 Markdown 转换为符合《党政机关公文格式》标准的 Word 文档
-    规范参考：GB/T 9704-2012
+    将 Markdown 转换为严格符合《党政机关公文格式》标准的 Word 文档
     """
     
     doc = Document()
 
-    # ── 1. 页面设置 (Page Setup) ──
+    # ── 1. 页面设置 (Page Setup) [cite: 138-142] ──
+    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -62,70 +73,144 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     # 开启奇偶页页眉页脚不同
     doc.settings.odd_and_even_pages_header_footer = True
 
-    # ── 2. 基础样式定义 (Styles) ──
+    # ── 2. 基础字体设置辅助函数 ──
     def set_run_font(run, font_cn, font_en='Times New Roman', size_pt=16, bold=False):
+        """
+        设置中西文字体
+        size_pt=16 对应 三号字
+        """
         run.font.name = font_en
         run._element.rPr.rFonts.set(qn('w:eastAsia'), font_cn)
         run.font.size = Pt(size_pt)
         run.font.bold = bold
         run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 修改默认样式 'Normal' 为公文正文样式
+    # 修改默认样式 'Normal' 为公文正文样式: 仿宋_GB2312, 三号(16pt), 行距28磅
     style_normal = doc.styles['Normal']
     style_normal.font.name = 'Times New Roman'
-    style_normal.element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+    style_normal.element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312') # 
     style_normal.font.size = Pt(16)
     style_normal.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    style_normal.paragraph_format.line_spacing = Pt(28)
-    style_normal.paragraph_format.first_line_indent = Pt(32)
+    style_normal.paragraph_format.line_spacing = Pt(28) # 
+    style_normal.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符 
 
-    # ── 3. 标题排版 (Main Title) ──
+    # ── 3. 大标题排版  ──
+    # 二号方正小标宋简体, 居中, 22pt
     head_p = doc.add_paragraph()
     head_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     head_p.paragraph_format.first_line_indent = Pt(0)
     head_p.paragraph_format.line_spacing = Pt(28)
     head_p.paragraph_format.space_before = Pt(0)
-    head_p.paragraph_format.space_after = Pt(28) 
+    head_p.paragraph_format.space_after = Pt(28) # 标题后空一行
 
     run_title = head_p.add_run(title)
+    # 优先使用方正小标宋简体，没有则回退
     set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
 
-    # ── 4. 正文内容解析与转换 ──
+    # ── 4. 正文内容解析与转换 (核心逻辑) ──
+    
+    # 计数器
+    h1_counter = 0
+    h2_counter = 0
+    h3_counter = 0 # 虽然公文三级用 1. 但我们这里简单重置一下
+    
     lines = md_text.splitlines()
     for line in lines:
-        stripped = line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
         
+        # 忽略水平线
         if re.match(r"^[-*_]{3,}\s*$", stripped):
             continue
 
-        # 识别标题 (#)
+        # ── 特殊处理：摘要和关键词 (不加序号) ──
+        # 检测是否包含 "摘要" 或 "关键词" 开头（忽略Markdown标记）
+        clean_text_check = re.sub(r"^[#\s]+", "", stripped)
+        if clean_text_check.startswith("摘要") or clean_text_check.startswith("关键词") or \
+           clean_text_check.startswith("Abstract") or clean_text_check.startswith("Keywords"):
+            
+            p = doc.add_paragraph()
+            # 摘要关键词通常顶格或缩进，这里按公文正文缩进，但加粗表示强调
+            p.paragraph_format.first_line_indent = Pt(32) 
+            
+            # 去掉可能的Markdown标记
+            content = re.sub(r"^[#*]+\s*", "", stripped).replace("*", "")
+            
+            # 分割 "摘要：" 和内容，如果有冒号
+            if "：" in content:
+                parts = content.split("：", 1)
+                run_head = p.add_run(parts[0] + "：")
+                set_run_font(run_head, '黑体', size_pt=16, bold=True) # 摘要二字用黑体
+                run_body = p.add_run(parts[1])
+                set_run_font(run_body, '仿宋_GB2312', size_pt=16, bold=False)
+            else:
+                run = p.add_run(content)
+                set_run_font(run, '黑体', size_pt=16, bold=True)
+            continue
+
+        # ── 标题解析 ──
         heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
         if heading_match:
             level = len(heading_match.group(1))
-            text = _strip_inline(heading_match.group(2))
-            
+            # 去掉原有的数字编号 (如 "1. 引言" -> "引言")
+            raw_text = heading_match.group(2)
+            # 正则去除 "1. ", "1.1 ", "1、" 等开头
+            text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
+            text_content = _strip_inline(text_content)
+
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
-            p.paragraph_format.first_line_indent = Pt(32)
-
-            run = p.add_run(text)
             
+            # 一级标题：三号黑体，"一、" 
             if level == 1:
-                set_run_font(run, 'SimHei', size_pt=16) 
+                h1_counter += 1
+                h2_counter = 0 # 重置子标题
+                h3_counter = 0
+                
+                # 公文一级标题通常不需要缩进，或者缩进2字符。
+                # 标准：《党政机关公文格式》中一级标题通常缩进2字符? 
+                # 实际上很多红头文件一级标题是“一、”顶格或缩进。
+                # 按照用户提供的规范：第一层：一、（黑体，单独占行）。
+                # 这里我们设置为首行缩进2字符，符合常规阅读习惯。
+                p.paragraph_format.first_line_indent = Pt(32)
+                
+                num_str = to_chinese_num(h1_counter)
+                run = p.add_run(f"{num_str}、{text_content}")
+                set_run_font(run, '黑体', size_pt=16) 
+
+            # 二级标题：三号楷体_GB2312，"（一）" 
             elif level == 2:
-                set_run_font(run, 'KaiTi', size_pt=16)
-            else:
-                set_run_font(run, '仿宋', size_pt=16, bold=True)
-            continue
-            
-        if not stripped:
+                h2_counter += 1
+                h3_counter = 0
+                p.paragraph_format.first_line_indent = Pt(32)
+                
+                num_str = to_chinese_num(h2_counter)
+                run = p.add_run(f"（{num_str}）{text_content}")
+                set_run_font(run, '楷体_GB2312', size_pt=16, bold=True) # 标准要求楷体加粗
+
+            # 三级标题：三号仿宋_GB2312，加粗，"1." 
+            elif level >= 3:
+                h3_counter += 1
+                p.paragraph_format.first_line_indent = Pt(32)
+                
+                # 如果AI已经生成了 1.1.1，我们这里简单化，按公文习惯只用 "1." 
+                # 或者如果用户希望保留层级，这里使用 h3_counter
+                run = p.add_run(f"{h3_counter}. {text_content}")
+                set_run_font(run, '仿宋_GB2312', size_pt=16, bold=True)
+
             continue
 
-        # 普通段落 (正文)
+        # ── 普通段落 ──
         p = doc.add_paragraph()
+        # 继承 Normal 样式：仿宋_GB2312, 16pt, 28磅行距, 缩进2字符
         _add_inline_runs_styled(p, stripped)
 
-    # ── 5. 页码设置 (Page Numbers) ──
+    # ── 5. 页码设置 (Page Numbers)  ──
+    # 四号半角宋体，左右各一条横线，单页居右，双页居左 (或居中)
+    # 用户规范 [cite: 197] 提到：单页码居右，双页码居左；或统一底端居中。
+    # 为了保险和美观，我们采用 **底端居中**，格式：— 1 —
+    
     def create_page_number_xml(run):
         fldChar1 = OxmlElement('w:fldChar')
         fldChar1.set(qn('w:fldCharType'), 'begin')
@@ -140,20 +225,24 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         fldChar2.set(qn('w:fldCharType'), 'end')
         run._element.append(fldChar2)
 
-    def setup_footer(footer, alignment):
+    def setup_footer(footer):
         p = footer.paragraphs[0]
-        p.alignment = alignment
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER # 统一居中
         p.paragraph_format.first_line_indent = 0
+        
+        # 格式：— 1 — 
         r1 = p.add_run("— ") 
-        set_run_font(r1, 'SimSun', size_pt=14)
+        set_run_font(r1, '宋体', size_pt=14) # 四号 = 14pt
+        
         r2 = p.add_run()
-        set_run_font(r2, 'SimSun', size_pt=14)
+        set_run_font(r2, '宋体', size_pt=14)
         create_page_number_xml(r2)
+        
         r3 = p.add_run(" —")
-        set_run_font(r3, 'SimSun', size_pt=14)
+        set_run_font(r3, '宋体', size_pt=14)
 
-    setup_footer(section.footer, WD_ALIGN_PARAGRAPH.RIGHT)
-    setup_footer(section.even_page_footer, WD_ALIGN_PARAGRAPH.LEFT)
+    setup_footer(section.footer)
+    setup_footer(section.even_page_footer)
 
     doc.save(filepath)
 
@@ -176,9 +265,10 @@ def _add_inline_runs_styled(paragraph, text: str):
     last = 0
     
     def apply_style(run, bold=False, italic=False, code=False):
+        # 强制正文使用仿宋_GB2312 
         run.font.name = 'Times New Roman'
-        run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
-        run.font.size = Pt(16)
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
+        run.font.size = Pt(16) # 三号
         run.font.color.rgb = RGBColor(0,0,0)
         
         if bold: run.font.bold = True
@@ -217,7 +307,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.2.3"  # Updated version
+APP_VERSION = "v2.3.0"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -282,7 +372,6 @@ DOCUMENT_TYPES = [
 ]
 
 # ── 提示词系统 (Prompts) ────────────────────────────────────────────────────
-# 为了防止复制截断，已检查字符串完整性
 OUTLINE_SYSTEM = (
     "你是一位资深写作顾问，擅长为各类专业文稿设计清晰、合理的结构大纲。\n\n"
     "请根据用户提供的文稿类型、题目和要求，输出一份层次分明的大纲。\n\n"
