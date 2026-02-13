@@ -21,28 +21,34 @@ jobs:
       with:
         python-version: '3.10'
 
-    # Linux 特定依赖
+    # Linux 必须安装系统级 ffmpeg，否则音频处理会失败
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk ffmpeg
+        sudo apt-get install -y python3-tk ffmpeg libsdl2-dev
 
-    # 安装 Python 依赖
     - name: Install Python dependencies
       run: |
         pip install --upgrade pip
+        # 这里会自动读取 requirements.txt 中的 moviepy<2.0
         pip install -r requirements.txt
         pip install pyinstaller
 
-    # 构建步骤 (大大简化，不再需要复杂的 hidden-import)
-    # 我们使用 --collect-all imageio_ffmpeg 确保转换器被打包进去
+    # 使用 Bash 运行 PyInstaller，解决 Windows 下的反斜杠问题
     - name: Build with PyInstaller
       shell: bash
       run: |
         pyinstaller --onefile --windowed --name="DeepTTS" \
-          --collect-all imageio_ffmpeg \
-          --hidden-import=pydub \
+          --collect-all moviepy \
+          --hidden-import=moviepy \
+          --hidden-import=moviepy.editor \
+          --hidden-import=moviepy.audio.fx.all \
+          --hidden-import=proglog \
+          --hidden-import=decorator \
+          --hidden-import=tqdm \
+          --hidden-import=imageio \
+          --hidden-import=imageio_ffmpeg \
           main.py
 
     - name: Upload Artifacts
