@@ -1,5 +1,6 @@
 import sys
 import os
+import json # 新增：用于处理配置文件
 
 # --- 兼容性修复 ---
 try:
@@ -10,9 +11,8 @@ import PIL.ImageTk
 # -----------------
 
 import threading
-import json
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, simpledialog
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
@@ -36,11 +36,13 @@ else:
     MAIN_FONT_NAME = "WenQuanYi Micro Hei" 
     UI_FONT_SIZE = 10
 
+# --- 配置文件路径 (用户主目录) ---
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".jinta_lesson_config.json")
+
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        # 【修复2】切换为 "flatly" (明亮主题) 以解决Linux下导出弹窗文字不可见的问题
         super().__init__(themename="flatly") 
-        self.title("金塔县中学教案智能生成系统 v3.3 (滚轮增强版)")
+        self.title("金塔县中学教案智能生成系统 v3.4 (自动保存授权版)")
         self.geometry("1350x950")
         
         self.lesson_data = {} 
@@ -48,26 +50,73 @@ class LessonPlanWriter(ttk.Window):
         
         self.is_generating = False
         self.stop_flag = False
-        self.api_key_var = tk.StringVar()
+        
+        # 变量
+        self.api_key = "" # 内部存储 Key，不再展示在界面上
+        self.api_status_var = tk.StringVar(value="❌ 未配置")
         self.total_periods_var = tk.IntVar(value=1)
         self.current_period_disp_var = tk.StringVar(value="1")
         
         self.author_info = "设计与开发：金塔县中学化学教研组 · 俞晋全 (Yu JinQuan) | 核心驱动：DeepSeek-V3"
         
+        self.load_config() # 启动时自动加载 Key
         self.setup_ui()
         self.save_current_data_to_memory(1)
+
+    def load_config(self):
+        """加载配置文件"""
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.api_key = config.get("api_key", "")
+                    if self.api_key:
+                        self.api_status_var.set("✅ 已就绪 (自动加载)")
+        except Exception:
+            pass
+
+    def save_config(self):
+        """保存配置文件"""
+        try:
+            config = {"api_key": self.api_key}
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f)
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存配置: {str(e)}")
+
+    def open_api_settings(self):
+        """打开二级弹窗输入 Key"""
+        # 使用 simpledialog 获取输入，默认值为当前 Key
+        new_key = simpledialog.askstring(
+            title="配置 API Key",
+            prompt="请输入 DeepSeek API Key:\n(输入后将自动保存，下次无需再次输入)",
+            initialvalue=self.api_key,
+            parent=self
+        )
+        
+        if new_key is not None: # 点击了确定（可能是空字符串，代表清空）
+            self.api_key = new_key.strip()
+            self.save_config() # 立即保存
+            
+            if self.api_key:
+                self.api_status_var.set("✅ 已就绪")
+                messagebox.showinfo("成功", "API Key 已保存！下次打开软件可直接使用。")
+            else:
+                self.api_status_var.set("❌ 未配置")
 
     def setup_ui(self):
         # ================= 顶部控制区 =================
         header_frame = ttk.Frame(self, padding=(15, 15))
         header_frame.pack(fill=X)
         
-        # API 设置
-        api_frame = ttk.Labelframe(header_frame, text="🔑 授权设置", padding=10, bootstyle="info")
+        # 1. API 设置 (改为按钮 + 状态标签)
+        api_frame = ttk.Labelframe(header_frame, text="🔑 授权管理", padding=10, bootstyle="info")
         api_frame.pack(side=LEFT, fill=Y, padx=(0, 10))
-        ttk.Entry(api_frame, textvariable=self.api_key_var, show="*", width=20, bootstyle="info").pack()
+        
+        ttk.Button(api_frame, text="⚙️ 配置 API Key", command=self.open_api_settings, bootstyle="info").pack(side=LEFT, padx=5)
+        ttk.Label(api_frame, textvariable=self.api_status_var, font=(MAIN_FONT_NAME, 9)).pack(side=LEFT, padx=5)
 
-        # 课题与进度
+        # 2. 课题与进度
         topic_frame = ttk.Labelframe(header_frame, text="📚 课题与进度规划", padding=10, bootstyle="primary")
         topic_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
         
@@ -99,7 +148,7 @@ class LessonPlanWriter(ttk.Window):
         self.period_combo.bind("<<ComboboxSelected>>", self.handle_period_switch)
         ttk.Label(f2, text="课时").pack(side=LEFT, padx=2)
 
-        # 全局操作区
+        # 3. 全局操作区
         action_frame = ttk.Labelframe(header_frame, text="⚙️ 全局操作", padding=10, bootstyle="secondary")
         action_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
         
@@ -111,7 +160,7 @@ class LessonPlanWriter(ttk.Window):
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
         
-        # --- 左侧：设计框架 ---
+        # 左侧框架
         left_frame = ttk.Labelframe(main_pane, text="1. 教学设计框架 (AI辅助)", padding=10, bootstyle="info")
         main_pane.add(left_frame, weight=1)
         
@@ -130,34 +179,24 @@ class LessonPlanWriter(ttk.Window):
         self.left_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # --- 【修复1】 鼠标滚轮绑定 (同时适配 Windows/Mac 和 Linux) ---
+        # 鼠标滚轮绑定
         def _on_mousewheel(event):
-            # Windows/Mac
             self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
         def _on_linux_scroll_up(event):
-            # Linux Scroll Up
             self.left_canvas.yview_scroll(-1, "units")
-
         def _on_linux_scroll_down(event):
-            # Linux Scroll Down
             self.left_canvas.yview_scroll(1, "units")
-
         def _bind_mouse(event):
-            # 只有鼠标进入左侧区域时才绑定全局滚轮，防止干扰右侧
             self.left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
             self.left_canvas.bind_all("<Button-4>", _on_linux_scroll_up)
             self.left_canvas.bind_all("<Button-5>", _on_linux_scroll_down)
-
         def _unbind_mouse(event):
             self.left_canvas.unbind_all("<MouseWheel>")
             self.left_canvas.unbind_all("<Button-4>")
             self.left_canvas.unbind_all("<Button-5>")
 
-        # 绑定进入/离开事件
         left_frame.bind('<Enter>', _bind_mouse)
         left_frame.bind('<Leave>', _unbind_mouse)
-        # -----------------------------------------------------------
 
         self.fields = {}
         font_bold = (MAIN_FONT_NAME, UI_FONT_SIZE, "bold")
@@ -214,7 +253,7 @@ class LessonPlanWriter(ttk.Window):
         footer_frame = ttk.Frame(self, bootstyle="light")
         footer_frame.pack(fill=X, side=BOTTOM)
         
-        self.status_var = tk.StringVar(value="准备就绪 - 请输入API Key并开始工作")
+        self.status_var = tk.StringVar(value="准备就绪")
         status_lbl = ttk.Label(footer_frame, textvariable=self.status_var, padding=(10, 5), font=(MAIN_FONT_NAME, 9))
         status_lbl.pack(side=LEFT)
         
@@ -224,7 +263,7 @@ class LessonPlanWriter(ttk.Window):
     # --- 逻辑处理 ---
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.3.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.4.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -278,11 +317,11 @@ class LessonPlanWriter(ttk.Window):
         return "\n".join(lines)
 
     def get_api_key(self):
-        key = self.api_key_var.get().strip()
-        if not key:
-            messagebox.showerror("错误", "请输入 DeepSeek API Key")
+        # 优先读取内部存储的 Key
+        if not self.api_key:
+            messagebox.showwarning("未配置 API Key", "请先点击左上角的【⚙️ 配置 API Key】按钮进行授权。\n配置后将自动保存，下次无需输入。")
             return None
-        return key
+        return self.api_key
 
     def stop_generation(self):
         if self.is_generating:
