@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog, QFormLayout
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QObject, QTimer
+    Qt, QThread, pyqtSignal, QObject
 )
 from PyQt6.QtGui import QFont
 from docx import Document
@@ -496,13 +496,11 @@ class PaperWriter(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # 适配Linux系统中文显示和输入
+    # 适配Linux系统中文显示（移除无效的AA_EnableInputMethods）
     if os.name == "posix":
         # 设置系统中文字体
         font = QFont("Noto Sans CJK SC")
         app.setFont(font)
-        # 启用输入法支持
-        app.setAttribute(Qt.ApplicationAttribute.AA_EnableInputMethods, True)
 
     window = PaperWriter()
     window.show()
