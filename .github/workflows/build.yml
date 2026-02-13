@@ -36,8 +36,9 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
+      # 修复说明：--hidden-import 参数解决了 Linux 下找不到 PIL._tkinter_finder 的错误
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "JintaLessonWriter-${{ matrix.name }}" main.py
+        pyinstaller --noconfirm --onefile --windowed --hidden-import=PIL._tkinter_finder --name "JintaLessonWriter-${{ matrix.name }}" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
