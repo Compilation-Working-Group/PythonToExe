@@ -3,7 +3,7 @@
 AI 写作助手 - 智能文稿创作平台
 支持 Anthropic Claude、DeepSeek、OpenAI 及自定义兼容接口
 支持学术论文、研究报告、工作计划、反思总结、案例分析、工作总结及自定义文稿
-版本：v2.3.9 (源头层级修复版)
+版本：v2.4.0 (结构均衡修复版)
 """
 
 import customtkinter as ctk
@@ -103,8 +103,9 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     h2_counter = 0
     h3_counter = 0
     
-    # 辅助函数：清洗行内容以进行比对
+    # 辅助函数：清洗行内容以进行比对 (智能去重)
     def clean_text_for_comparison(text):
+        # 去除 Markdown 符号、序号、空格，只比对核心文字
         t = re.sub(r"^[#\*\-1-9一二三四五六七八九十\.\、\s]+", "", text)
         t = re.sub(r"[^\w\u4e00-\u9fa5]", "", t)
         return t.strip()
@@ -140,7 +141,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             is_list_item = True
             stripped = list_match.group(2) 
 
-        # ── 特殊段落拦截 ──
+        # ── 特殊段落拦截：摘要、关键词、参考文献 ──
         clean_check = re.sub(r"^[#\s]+", "", stripped)
         clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?\s*", "", clean_check).strip()
 
@@ -173,6 +174,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
             
+            # 深度清洗标题内容
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
             text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
             text_content = _strip_inline(text_content) 
@@ -289,7 +291,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.9"  # Final polished version
+APP_VERSION = "v2.4.0"  # Final polished version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -341,7 +343,7 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 动态提示词系统 (核心优化：源头控制) ──────────────────────────────────────
+# ── 动态提示词系统 (核心优化：强制均衡结构) ──────────────────────────────────
 def get_system_prompts(doc_type, user_req=""):
     """根据文稿类型和用户要求动态生成 System Prompt"""
     if doc_type == "自定义":
@@ -368,21 +370,20 @@ def get_system_prompts(doc_type, user_req=""):
     else:
         outline_sys += "结构需符合该文体的标准规范。\n"
 
-    # 正文提示词 (Writing Prompt) - 重点修复层级
+    # 正文提示词 (Writing Prompt) - 重点修复“单一大章节”问题
     writing_sys = f"{role_desc}\n请根据大纲撰写正文。\n\n"
     writing_sys += f"【用户附加要求】：{user_req if user_req else '无'}\n\n"
     
     if doc_type == "自定义":
         writing_sys += (
             "【撰写原则】\n"
-            "1. **严格控制字数**：必须符合用户指定的字数限制。\n"
-            "2. **风格适配**：严格采用用户要求的语体风格。\n"
-            "3. **结构规范**：\n"
-            "   - 正文的**一级章节**（如“一、”）请务必使用 Markdown 的 **# (一个井号)** 标记。\n"
-            "   - **子章节**（如“（一）”）请使用 **## (两个井号)** 标记。\n"
-            "   - 严禁跳过一级标题直接写二级标题。\n"
-            "4. **禁止手动编号**：标题前不要加“1.”、“一、”等序号，只写内容，由排版软件自动生成。\n"
-            "5. **负面约束**：严禁将论文题目本身作为一级标题再次输出！输出顺序严格为：\n"
+            "1. **结构均衡**：正文必须包含 **至少3个** 一级标题（使用 # 标记），例如“一、问题”、“二、分析”、“三、对策”。\n"
+            "   - 严禁将全文所有内容都塞进同一个一级标题（如“一、引言”）下面！\n"
+            "2. **层级规范**：\n"
+            "   - 一级章节用 Markdown 的 **#**。\n"
+            "   - 子章节用 **##**。\n"
+            "3. **禁止手动编号**：标题前不要加“1.”、“一、”等序号，由排版软件自动生成。\n"
+            "4. **严禁在摘要前添加任何标题**：输出顺序必须严格为：\n"
             "   [题目] -> [摘要](如有) -> [关键词](如有) -> [正文内容(从#开始)]\n"
         )
     else:
