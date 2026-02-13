@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QDialog, QFormLayout, QMessageBox, QMenuBar, QAction,
     QTabWidget
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from docx import Document
 from docx.shared import Pt
 from docx.oxml.ns import qn
@@ -18,7 +18,7 @@ CONFIG_FILE = "config.json"
 DRAFT_FILE = "draft.json"
 
 
-# ===================== 配置读写 =====================
+# ===================== 工具函数：读写 JSON =====================
 
 def load_json(path, default=None):
     if default is None:
@@ -62,7 +62,7 @@ def save_draft(title, doc_type, outline, fulltext):
     save_json(DRAFT_FILE, data)
 
 
-# ===================== 文稿模板 =====================
+# ===================== 文稿模板管理 =====================
 
 class TemplateManager:
     def __init__(self):
@@ -76,11 +76,11 @@ class TemplateManager:
                     "四、研究结果\n"
                     "五、讨论\n"
                     "六、结论与展望\n"
-                    "七、参考文献（仅列出结构，不必具体文献）。\n"
+                    "七、参考文献（仅列出结构）。\n"
                     "使用如下分级格式：一、（一）1.（1）。"
                 ),
                 "full": (
-                    "请根据给定大纲撰写一篇完整的中文期刊论文，包含：摘要、引言、方法、结果、讨论、结论。"
+                    "请根据给定大纲撰写一篇完整的中文期刊论文，包含：摘要、引言、方法、结果、讨论、结论。\n"
                     "要求：\n"
                     "1. 文风学术、规范，逻辑清晰。\n"
                     "2. 各部分内容充实，有论证、有分析。\n"
@@ -175,6 +175,61 @@ class TemplateManager:
         return self.templates.get(doc_type, self.templates["自定义文稿"])["full"]
 
 
+# ===================== DeepSeek 流式写作线程 =====================
+
+class WritingThread(QThread):
+    text_chunk = pyqtSignal(str)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, api_key, base_url, model, system_prompt, user_prompt):
+        super().__init__()
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self.system_prompt = system_prompt
+        self.user_prompt = user_prompt
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        try:
+            url = f"{self.base_url}/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": self.user_prompt}
+                ],
+                "stream": True
+            }
+
+            with requests.post(url, headers=headers, json=payload, stream=True) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not self._running:
+                        break
+                    if line:
+                        try:
+                            data = json.loads(line.decode("utf-8").replace("data: ", ""))
+                            delta = data["choices"][0]["delta"].get("content", "")
+                            if delta:
+                                self.text_chunk.emit(delta)
+                        except:
+                            continue
+
+            self.finished.emit()
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 # ===================== 设置窗口 =====================
 
 class SettingsDialog(QDialog):
@@ -220,7 +275,7 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
-# ===================== 主程序 =====================
+# ===================== 主界面 =====================
 
 class WriterApp(QWidget):
     def __init__(self):
@@ -270,31 +325,37 @@ class WriterApp(QWidget):
         # 按钮区
         btn_row1 = QHBoxLayout()
         self.btn_outline = QPushButton("生成大纲")
-        self.btn_full = QPushButton("撰写全文")
-        self.btn_abstract = QPushButton("生成摘要")
-        self.btn_refs = QPushButton("生成参考文献示例")
+        self.btn_full = QPushButton("撰写全文（流式）")
+        self.btn_stop = QPushButton("终止撰写")
+        self.btn_clear = QPushButton("清空内容")
 
         self.btn_outline.clicked.connect(self.generate_outline)
-        self.btn_full.clicked.connect(self.generate_fulltext)
-        self.btn_abstract.clicked.connect(self.generate_abstract)
-        self.btn_refs.clicked.connect(self.generate_references)
+        self.btn_full.clicked.connect(self.start_writing)
+        self.btn_stop.clicked.connect(self.stop_writing)
+        self.btn_clear.clicked.connect(self.clear_text)
 
         btn_row1.addWidget(self.btn_outline)
         btn_row1.addWidget(self.btn_full)
-        btn_row1.addWidget(self.btn_abstract)
-        btn_row1.addWidget(self.btn_refs)
+        btn_row1.addWidget(self.btn_stop)
+        btn_row1.addWidget(self.btn_clear)
 
         main_layout.addLayout(btn_row1)
 
         btn_row2 = QHBoxLayout()
-        self.btn_export_docx = QPushButton("导出 Word（公文格式）")
+        self.btn_abstract = QPushButton("生成摘要")
+        self.btn_refs = QPushButton("生成参考文献")
+        self.btn_export_docx = QPushButton("导出 Word")
         self.btn_export_md = QPushButton("导出 Markdown")
         self.btn_export_txt = QPushButton("导出 TXT")
 
+        self.btn_abstract.clicked.connect(self.generate_abstract)
+        self.btn_refs.clicked.connect(self.generate_references)
         self.btn_export_docx.clicked.connect(self.export_word)
         self.btn_export_md.clicked.connect(self.export_markdown)
         self.btn_export_txt.clicked.connect(self.export_txt)
 
+        btn_row2.addWidget(self.btn_abstract)
+        btn_row2.addWidget(self.btn_refs)
         btn_row2.addWidget(self.btn_export_docx)
         btn_row2.addWidget(self.btn_export_md)
         btn_row2.addWidget(self.btn_export_txt)
@@ -307,7 +368,7 @@ class WriterApp(QWidget):
         self.fulltext_edit = QTextEdit()
 
         self.outline_edit.setPlaceholderText("这里是大纲，可手动修改……")
-        self.fulltext_edit.setPlaceholderText("这里是全文，可手动修改……")
+        self.fulltext_edit.setPlaceholderText("这里是正文，可手动修改……")
 
         self.tabs.addTab(self.outline_edit, "大纲")
         self.tabs.addTab(self.fulltext_edit, "正文")
@@ -315,6 +376,45 @@ class WriterApp(QWidget):
         main_layout.addWidget(self.tabs, 1)
 
         self.setLayout(main_layout)
+
+        # 应用美化样式
+        self.apply_style()
+
+    # ---------- 美化界面 ----------
+
+    def apply_style(self):
+        self.setStyleSheet("""
+            QWidget {
+                font-family: 'Microsoft YaHei';
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #4A90E2;
+                color: white;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #357ABD;
+            }
+            QPushButton:pressed {
+                background-color: #2C5A93;
+            }
+            QLineEdit, QTextEdit, QComboBox {
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #CCCCCC;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+            }
+            QTabBar::tab:selected {
+                background-color: #E6F0FA;
+            }
+        """)
 
     # ---------- DeepSeek 调用 ----------
 
@@ -329,10 +429,7 @@ class WriterApp(QWidget):
             return None
 
         url = f"{base_url}/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,
             "messages": [
@@ -345,13 +442,12 @@ class WriterApp(QWidget):
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=120)
             resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            return resp.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            QMessageBox.critical(self, "调用失败", f"调用 DeepSeek 失败：\n{e}")
+            QMessageBox.critical(self, "调用失败", str(e))
             return None
 
-    # ---------- 业务：大纲 / 正文 / 摘要 / 参考文献 ----------
+    # ---------- 生成大纲 ----------
 
     def generate_outline(self):
         title = self.title_edit.text().strip()
@@ -377,20 +473,19 @@ class WriterApp(QWidget):
             self.tabs.setCurrentWidget(self.outline_edit)
             self.auto_save()
 
-    def generate_fulltext(self):
-        title = self.title_edit.text().strip()
-        doc_type = self.type_combo.currentText()
-        outline = self.outline_edit.toPlainText().strip()
+    # ---------- 流式撰写正文 ----------
 
-        if not title:
-            QMessageBox.warning(self, "缺少标题", "请先输入标题")
-            return
-        if not outline:
-            QMessageBox.warning(self, "缺少大纲", "请先生成或编写大纲")
+    def start_writing(self):
+        title = self.title_edit.text().strip()
+        outline = self.outline_edit.toPlainText().strip()
+        doc_type = self.type_combo.currentText()
+
+        if not title or not outline:
+            QMessageBox.warning(self, "缺少内容", "请先输入标题并生成大纲")
             return
 
         system_prompt = (
-            "你是一名专业中文写作者，请根据给定大纲撰写完整文稿。\n"
+            "你是一名专业中文写作者，请根据给定大纲流式撰写完整文稿。\n"
             "要求：\n"
             "1. 文风正式、规范，适合正式发表或存档。\n"
             "2. 严格按照大纲结构展开，标题层级保持一致。\n"
@@ -402,269 +497,7 @@ class WriterApp(QWidget):
             f"标题：{title}\n"
             f"{type_prompt}\n"
             "以下是大纲：\n"
-            "------------------\n"
             f"{outline}\n"
-            "------------------\n"
-            "请据此撰写完整文稿。"
+            "请开始撰写正文。"
         )
 
-        content = self.call_deepseek(system_prompt, user_prompt, temperature=0.7)
-        if content:
-            self.fulltext_edit.setPlainText(content)
-            self.tabs.setCurrentWidget(self.fulltext_edit)
-            self.auto_save()
-
-    def generate_abstract(self):
-        title = self.title_edit.text().strip()
-        fulltext = self.fulltext_edit.toPlainText().strip()
-        if not title or not fulltext:
-            QMessageBox.warning(self, "缺少内容", "请先生成或撰写正文，再生成摘要。")
-            return
-
-        system_prompt = (
-            "你是一名学术写作助手，请根据给定正文生成一个中文摘要。\n"
-            "要求：\n"
-            "1. 200～300 字左右。\n"
-            "2. 概括研究/内容的目的、方法、结果、结论（若适用）。\n"
-            "3. 文风简洁、准确。"
-        )
-        user_prompt = f"标题：{title}\n正文如下：\n{fulltext}"
-
-        content = self.call_deepseek(system_prompt, user_prompt, temperature=0.4)
-        if content:
-            # 将摘要插入正文最前面
-            new_text = f"【摘要】\n{content.strip()}\n\n{fulltext}"
-            self.fulltext_edit.setPlainText(new_text)
-            self.tabs.setCurrentWidget(self.fulltext_edit)
-            self.auto_save()
-
-    def generate_references(self):
-        title = self.title_edit.text().strip()
-        doc_type = self.type_combo.currentText()
-        fulltext = self.fulltext_edit.toPlainText().strip()
-        if not title or not fulltext:
-            QMessageBox.warning(self, "缺少内容", "请先生成或撰写正文，再生成参考文献示例。")
-            return
-
-        system_prompt = (
-            "你是一名学术写作助手，请根据标题和正文内容，生成若干条示例参考文献，"
-            "使用中文常见期刊/图书/网络文献格式，注意：\n"
-            "1. 可以是虚构但要格式规范。\n"
-            "2. 不需要太多，一般 5～10 条即可。\n"
-            "3. 每条独立成行。"
-        )
-        user_prompt = f"文稿类型：{doc_type}\n标题：{title}\n正文如下：\n{fulltext}"
-
-        content = self.call_deepseek(system_prompt, user_prompt, temperature=0.6)
-        if content:
-            new_text = self.fulltext_edit.toPlainText().rstrip()
-            new_text += "\n\n【参考文献】\n" + content.strip()
-            self.fulltext_edit.setPlainText(new_text)
-            self.tabs.setCurrentWidget(self.fulltext_edit)
-            self.auto_save()
-
-    # ---------- 导出：Word / Markdown / TXT ----------
-
-    def detect_heading_level(self, line: str) -> int:
-        line = line.lstrip()
-        if re.match(r"^[一二三四五六七八九十]+、", line):
-            return 1
-        if re.match(r"^（[一二三四五六七八九十]+）", line):
-            return 2
-        if re.match(r"^\d+\.", line):
-            return 3
-        if re.match(r"^（\d+）", line):
-            return 4
-        return 0
-
-    def export_word(self):
-        text = self.fulltext_edit.toPlainText().strip()
-        title = self.title_edit.text().strip()
-        if not text:
-            QMessageBox.warning(self, "无内容", "正文为空，无法导出。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "导出 Word（公文格式）", f"{title or '文稿'}.docx", "Word 文档 (*.docx)"
-        )
-        if not file_path:
-            return
-
-        try:
-            doc = Document()
-
-            # 正文默认样式
-            style = doc.styles["Normal"]
-            style.font.name = "宋体"
-            style._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
-            style.font.size = Pt(12)
-
-            # 标题（小标宋，居中）
-            if title:
-                p = doc.add_paragraph()
-                p.alignment = 1
-                run = p.add_run(title)
-                run.bold = True
-                run.font.size = Pt(16)
-                run.font.name = "方正小标宋简体"
-                run._element.rPr.rFonts.set(qn("w:eastAsia"), "方正小标宋简体")
-
-            for line in text.splitlines():
-                line = line.rstrip()
-                if not line:
-                    doc.add_paragraph("")
-                    continue
-
-                level = self.detect_heading_level(line)
-
-                if level == 1:
-                    p = doc.add_paragraph()
-                    run = p.add_run(line)
-                    run.bold = True
-                    run.font.name = "黑体"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-                    run.font.size = Pt(15)
-                elif level == 2:
-                    p = doc.add_paragraph()
-                    run = p.add_run(line)
-                    run.bold = True
-                    run.font.name = "黑体"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-                    run.font.size = Pt(14)
-                elif level == 3:
-                    p = doc.add_paragraph()
-                    run = p.add_run(line)
-                    run.bold = True
-                    run.font.name = "楷体"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "楷体")
-                    run.font.size = Pt(13)
-                elif level == 4:
-                    p = doc.add_paragraph()
-                    run = p.add_run(line)
-                    run.bold = True
-                    run.font.name = "楷体"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "楷体")
-                    run.font.size = Pt(12)
-                else:
-                    p = doc.add_paragraph()
-                    p.paragraph_format.first_line_indent = Pt(24)
-                    p.paragraph_format.line_spacing = 1.5
-                    run = p.add_run(line)
-                    run.font.name = "宋体"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
-                    run.font.size = Pt(12)
-
-            doc.save(file_path)
-            QMessageBox.information(self, "导出成功", f"已导出：\n{file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出 Word 失败：\n{e}")
-
-    def export_markdown(self):
-        text = self.fulltext_edit.toPlainText().strip()
-        title = self.title_edit.text().strip()
-        if not text:
-            QMessageBox.warning(self, "无内容", "正文为空，无法导出。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "导出 Markdown", f"{title or '文稿'}.md", "Markdown 文件 (*.md)"
-        )
-        if not file_path:
-            return
-
-        lines = []
-        if title:
-            lines.append(f"# {title}\n")
-
-        for line in text.splitlines():
-            l = line.strip()
-            if not l:
-                lines.append("")
-                continue
-            level = self.detect_heading_level(l)
-            if level == 1:
-                lines.append(f"## {l}")
-            elif level == 2:
-                lines.append(f"### {l}")
-            elif level == 3:
-                lines.append(f"#### {l}")
-            elif level == 4:
-                lines.append(f"##### {l}")
-            else:
-                lines.append(l)
-
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-            QMessageBox.information(self, "导出成功", f"已导出：\n{file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出 Markdown 失败：\n{e}")
-
-    def export_txt(self):
-        text = self.fulltext_edit.toPlainText().strip()
-        title = self.title_edit.text().strip()
-        if not text:
-            QMessageBox.warning(self, "无内容", "正文为空，无法导出。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "导出 TXT", f"{title or '文稿'}.txt", "文本文件 (*.txt)"
-        )
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                if title:
-                    f.write(title + "\n\n")
-                f.write(text)
-            QMessageBox.information(self, "导出成功", f"已导出：\n{file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出 TXT 失败：\n{e}")
-
-    # ---------- 草稿自动保存 / 载入 ----------
-
-    def auto_save(self):
-        save_draft(
-            self.title_edit.text().strip(),
-            self.type_combo.currentText(),
-            self.outline_edit.toPlainText(),
-            self.fulltext_edit.toPlainText(),
-        )
-
-    def manual_save_draft(self):
-        self.auto_save()
-        QMessageBox.information(self, "草稿已保存", "当前标题、大纲、正文已保存到本地草稿。")
-
-    def load_draft_if_any(self):
-        draft = load_draft()
-        if not draft:
-            return
-        self.title_edit.setText(draft.get("title", ""))
-        doc_type = draft.get("doc_type", "期刊论文")
-        idx = self.type_combo.findText(doc_type)
-        if idx >= 0:
-            self.type_combo.setCurrentIndex(idx)
-        self.outline_edit.setPlainText(draft.get("outline", ""))
-        self.fulltext_edit.setPlainText(draft.get("fulltext", ""))
-
-    def closeEvent(self, event):
-        self.auto_save()
-        event.accept()
-
-    # ---------- 设置 ----------
-
-    def open_settings(self):
-        dlg = SettingsDialog(self)
-        dlg.exec_()
-
-
-def main():
-    app = QApplication(sys.argv)
-    win = WriterApp()
-    win.show()
-    sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    main()
