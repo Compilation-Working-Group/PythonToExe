@@ -5,14 +5,29 @@ import threading
 import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog
+from tkinter import ttk  # 引入 ttk 用于更现代的控件（下拉列表）
 import docx
 import edge_tts
 from openai import OpenAI
-# 引入 ffmpeg 路径获取工具，比 moviepy 稳定得多
 import imageio_ffmpeg
 
 # 默认配置
 DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
+
+# --- 语音角色映射表 ---
+VOICE_MAP = {
+    "晓晓 (女声 - 活泼/默认)": "zh-CN-XiaoxiaoNeural",
+    "云希 (男声 - 沉稳/影视)": "zh-CN-YunxiNeural",
+    "云健 (男声 - 体育/解说)": "zh-CN-YunjianNeural",
+    "晓伊 (女声 - 可爱/儿童)": "zh-CN-XiaoyiNeural",
+    "云扬 (男声 - 新闻/播音)": "zh-CN-YunyangNeural",
+    "辽宁小北 (方言 - 东北话)": "zh-CN-Liaoning-XiaobeiNeural",
+    "陕西小妮 (方言 - 陕西话)": "zh-CN-Shaanxi-XiaoniNeural",
+    "香港晓佳 (方言 - 粤语)": "zh-HK-HiuGaaiNeural",
+    "台湾晓臻 (方言 - 台湾腔)": "zh-TW-HsiaoChenNeural",
+    "英语 (女声 - Aria)": "en-US-AriaNeural",
+    "英语 (男声 - Christopher)": "en-US-ChristopherNeural"
+}
 
 class TTSApp:
     def __init__(self, root):
@@ -20,8 +35,8 @@ class TTSApp:
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
         # 窗口设置
-        window_width = 850
-        window_height = 600
+        window_width = 900  # 稍微加宽一点以容纳选项
+        window_height = 650
         self.center_window(window_width, window_height)
         self.root.minsize(800, 500)
         
@@ -30,6 +45,9 @@ class TTSApp:
         self.is_generating = False 
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
+        
+        # 默认选中第一个
+        self.selected_voice_key = tk.StringVar(value="晓晓 (女声 - 活泼/默认)")
         
         threading.Thread(target=self.start_loop, daemon=True).start()
         self.create_ui()
@@ -64,13 +82,22 @@ class TTSApp:
         self.status_label.pack(side=tk.LEFT, padx=5)
         tk.Label(frame_status, text="Author: Yu JinQuan", anchor=tk.E, bg="#f0f0f0", fg="#666").pack(side=tk.RIGHT, padx=10)
 
-        # 2.2 导出区
-        frame_bottom = tk.LabelFrame(self.root, text="语音合成与导出", padx=10, pady=5)
+        # 2.2 导出与控制区
+        frame_bottom = tk.LabelFrame(self.root, text="语音控制与导出", padx=10, pady=5)
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 10))
         
+        # --- 新增：语音选择下拉框 ---
+        tk.Label(frame_bottom, text="选择语音:").pack(side=tk.LEFT, padx=(5, 0))
+        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25)
+        voice_combo.pack(side=tk.LEFT, padx=5)
+        # -------------------------
+
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10) # 分隔线
+
         tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=12).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="⏹️ 停止 / 重置", command=self.stop_audio, bg="#ffcdd2", width=12).pack(side=tk.LEFT, padx=5)
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=15)
+        tk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bg="#ffcdd2", width=8).pack(side=tk.LEFT, padx=5)
+        
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10) # 分隔线
         
         tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav")).pack(side=tk.LEFT, padx=5)
@@ -149,8 +176,15 @@ class TTSApp:
             self.root.after(0, lambda: self.update_status("润色失败"))
 
     async def _generate_audio_task(self, text, output_file):
-        voice = "zh-CN-XiaoxiaoNeural"
-        communicate = edge_tts.Communicate(text, voice)
+        # === 核心修改：从下拉框获取 Voice ID ===
+        selected_name = self.selected_voice_key.get()
+        # 默认为晓晓，防止出错
+        voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
+        
+        # 可以在控制台打印一下确认
+        print(f"Using Voice: {selected_name} -> {voice_id}")
+        
+        communicate = edge_tts.Communicate(text, voice_id)
         await communicate.save(output_file)
 
     def play_audio(self):
@@ -158,7 +192,7 @@ class TTSApp:
         if not text: return
         self.stop_audio()
         self.is_generating = True
-        self.update_status("正在合成...")
+        self.update_status(f"正在合成 ({self.selected_voice_key.get()})...")
         
         def run_gen():
             try:
@@ -170,6 +204,7 @@ class TTSApp:
                 self.root.after(0, self._play_sound)
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
+                self.root.after(0, lambda: self.update_status("合成出错"))
 
         threading.Thread(target=run_gen).start()
 
@@ -223,21 +258,16 @@ class TTSApp:
                 elif fmt == "wav":
                     self.root.after(0, lambda: self.update_status("正在转换格式 (FFmpeg)..."))
                     
-                    # === 核心修改：使用 imageio_ffmpeg 直接转换，不依赖 moviepy ===
+                    # 使用 imageio_ffmpeg
                     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-                    
-                    # 调用 ffmpeg 命令行：-i 输入 -acodec pcm_s16le (标准wav编码) -y (覆盖)
-                    # hide_banner loglevel error 用于减少控制台输出
                     cmd = [
                         ffmpeg_exe, "-y",
                         "-i", temp_mp3,
                         "-acodec", "pcm_s16le",
-                        "-ar", "44100", # 采样率
-                        "-ac", "2",     # 双声道
+                        "-ar", "44100", 
+                        "-ac", "2", 
                         save_path
                     ]
-                    
-                    # 运行转换命令
                     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     if os.path.exists(temp_mp3):
@@ -246,8 +276,6 @@ class TTSApp:
                 self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
                 self.root.after(0, lambda: self.update_status("导出完成"))
             
-            except subprocess.CalledProcessError:
-                self.root.after(0, lambda: messagebox.showerror("转换失败", "FFmpeg 转换过程中出错，请检查系统环境。"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
                 self.root.after(0, lambda: self.update_status("导出失败"))
