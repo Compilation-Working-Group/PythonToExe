@@ -2,4 +2,4 @@ requests
 python-docx
 ttkbootstrap
 pyinstaller
-Pillow
+Pillow==9.5.0
