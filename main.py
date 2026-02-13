@@ -1,7 +1,7 @@
 import sys
 import os
 
-# --- 【关键修复】针对 Linux/PyInstaller 丢失模块的强制导入 ---
+# --- 【关键修复1】针对 Linux/PyInstaller 丢失模块的强制导入 ---
 try:
     import PIL._tkinter_finder
 except ImportError:
@@ -23,6 +23,17 @@ from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+
+# --- 【关键修复2】字体自动适配 ---
+# Linux 系统通常没有 "微软雅黑"，这里做一个简单的检测
+DEFAULT_FONT = "Helvetica" # Linux 常用默认
+SYSTEM_PLATFORM = sys.platform
+if SYSTEM_PLATFORM.startswith('win'):
+    MAIN_FONT_NAME = "微软雅黑"
+elif SYSTEM_PLATFORM.startswith('darwin'): # macOS
+    MAIN_FONT_NAME = "PingFang SC"
+else: # Linux
+    MAIN_FONT_NAME = "WenQuanYi Micro Hei" # 尝试常用开源中文字体，如果没有会自动回退
 
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
@@ -56,7 +67,8 @@ class LessonPlanWriter(ttk.Window):
         self.type_combo.pack(side=LEFT, padx=5)
 
         # --- 中间：分两栏 ---
-        main_pane = ttk.PanedWindow(self, orient=HORIZONTAL)
+        # 【关键修复3】将 PanedWindow 改为 Panedwindow (小写w)
+        main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=10, pady=5)
         
         # --- 左侧面板：教案框架 ---
@@ -91,10 +103,14 @@ class LessonPlanWriter(ttk.Window):
             ("作业设计", "homework", 4),
         ]
         
+        # 使用适配后的字体
+        ui_font_bold = (MAIN_FONT_NAME, 9, "bold")
+        ui_font_normal = (MAIN_FONT_NAME, 9)
+
         for text, key, height in labels:
-            lbl = ttk.Label(self.scrollable_frame, text=text, font=("微软雅黑", 9, "bold"))
+            lbl = ttk.Label(self.scrollable_frame, text=text, font=ui_font_bold)
             lbl.pack(anchor=W, pady=(5, 0))
-            txt = tk.Text(self.scrollable_frame, height=height, width=40, font=("微软雅黑", 9))
+            txt = tk.Text(self.scrollable_frame, height=height, width=40, font=ui_font_normal)
             txt.pack(fill=X, pady=(0, 5))
             self.fields[key] = txt
         
@@ -116,8 +132,8 @@ class LessonPlanWriter(ttk.Window):
         self.instruction_entry.insert(0, "体现新课标理念，注重实验探究")
 
         # 教学过程文本框
-        ttk.Label(right_frame, text="教学过程与师生活动:", font=("微软雅黑", 10, "bold")).pack(anchor=W)
-        self.process_text = ScrolledText(right_frame, font=("微软雅黑", 10))
+        ttk.Label(right_frame, text="教学过程与师生活动:", font=(MAIN_FONT_NAME, 10, "bold")).pack(anchor=W)
+        self.process_text = ScrolledText(right_frame, font=(MAIN_FONT_NAME, 10))
         self.process_text.pack(fill=BOTH, expand=True, pady=5)
         
         # 底部控制栏
@@ -279,6 +295,7 @@ class LessonPlanWriter(ttk.Window):
 
         try:
             doc = Document()
+            # 设置中文字体基础
             doc.styles['Normal'].font.name = u'宋体'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
