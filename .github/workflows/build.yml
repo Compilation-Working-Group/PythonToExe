@@ -13,19 +13,20 @@ jobs:
           - os: windows-latest
             name: Windows
             ext: .exe
-            # Windows 下通常需要显式指定这些隐藏导入以防万一
+            # Windows 需要显式指定 PIL 的隐藏导入
             args: --hidden-import=PIL._tkinter_finder --hidden-import=PIL.ImageTk
           
           - os: macos-latest
             name: macOS
             ext: ""
+            # Mac 只需要 ImageTk
             args: --hidden-import=PIL.ImageTk
           
           - os: ubuntu-latest
             name: Linux
             ext: ""
-            # Linux 下只保留 ImageTk，避免因强制查找 _tkinter_finder 导致构建失败
-            args: --hidden-import=PIL.ImageTk
+            # 【重要】Linux 改用 collect-all 策略，并依赖下方安装的系统库
+            args: --collect-all ttkbootstrap
 
     runs-on: ${{ matrix.os }}
 
@@ -36,6 +37,13 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+
+    # 【关键修复步骤】手动安装 Linux 缺失的 Tkinter 系统库
+    - name: Install System Dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk tk-dev
 
     - name: Install dependencies
       run: |
