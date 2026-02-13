@@ -3,7 +3,7 @@
 AI 写作助手 - 智能文稿创作平台
 支持 Anthropic Claude、DeepSeek、OpenAI 及自定义兼容接口
 支持学术论文、研究报告、工作计划、反思总结、案例分析、工作总结及自定义文稿
-版本：v2.3.7 (最终优化版)
+版本：v2.3.8 (模糊去重+结构召回版)
 """
 
 import customtkinter as ctk
@@ -14,6 +14,7 @@ import json
 import os
 import re
 from datetime import datetime
+import difflib  # 新增：用于计算文本相似度
 
 # ── 引入 docx 相关库用于公文排版 ──────────────────────────────────────────────
 from docx import Document
@@ -102,10 +103,12 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     h2_counter = 0
     h3_counter = 0
     
-    # 辅助函数：清洗行内容以进行比对 (智能去重)
+    # 辅助函数：清洗行内容以进行比对
     def clean_text_for_comparison(text):
         # 去除 Markdown 符号、序号、空格，只比对核心文字
         t = re.sub(r"^[#\*\-1-9一二三四五六七八九十\.\、\s]+", "", text)
+        # 去除标点符号，只保留汉字和字母数字，提高匹配准确率
+        t = re.sub(r"[^\w\u4e00-\u9fa5]", "", t)
         return t.strip()
 
     title_clean = clean_text_for_comparison(title)
@@ -116,14 +119,28 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if not stripped: continue
         if re.match(r"^[-*_]{3,}\s*$", stripped): continue
 
-        # ──【核心修复】智能去重 ──
-        # 即使这行前面有 "1. " 或 "一、"，只要核心文字和题目一样，就跳过
+        # ──【核心修复】智能模糊去重 ──
+        # 即使 AI 生成的标题少几个字或多几个字，也能识别并删除
         current_line_clean = clean_text_for_comparison(stripped)
-        if current_line_clean == title_clean:
+        
+        # 计算相似度 (0.0 - 1.0)
+        similarity = 0.0
+        if title_clean and current_line_clean:
+            similarity = difflib.SequenceMatcher(None, title_clean, current_line_clean).ratio()
+        
+        # 如果相似度超过 0.8 (80%)，或者互相包含，则视为重复标题
+        is_duplicate = False
+        if similarity > 0.8:
+            is_duplicate = True
+        elif title_clean and current_line_clean and (title_clean in current_line_clean or current_line_clean in title_clean):
+            # 防止“关于X的策略”和“X的策略”这种包含关系被漏掉
+            if len(current_line_clean) > 4: # 避免误伤太短的词
+                is_duplicate = True
+
+        if is_duplicate:
             continue
 
         # ── 预处理：剥离行首的列表符号 ──
-        # 这能解决 "1. 一、标题" 这种双重编号问题
         is_list_item = False
         list_match = re.match(r"^(\d+[.、]|\*|-)\s+(.*)", stripped)
         if list_match:
@@ -163,7 +180,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
             
-            # 深度清洗标题内容：去除 "1. ", "一、", "(1)" 等所有自带编号
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
             text_content = re.sub(r"^[\(（][一二三四五六七八九十\d]+[\)）]\s*", "", text_content)
             text_content = _strip_inline(text_content) 
@@ -280,7 +296,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.7"  # Final polished version
+APP_VERSION = "v2.3.8"  # Final polished version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -332,7 +348,7 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 动态提示词系统 (核心修复：强制顺序与层级) ────────────────────────────────
+# ── 动态提示词系统 (核心修复：强制顺序与结构) ────────────────────────────────
 def get_system_prompts(doc_type, user_req=""):
     """根据文稿类型和用户要求动态生成 System Prompt"""
     if doc_type == "自定义":
@@ -347,8 +363,9 @@ def get_system_prompts(doc_type, user_req=""):
     if doc_type == "自定义":
         outline_sys += (
             "【重要指令】\n"
-            "1. **完全遵循用户要求**：严格执行用户的字数、风格要求，不要套用学术论文格式。\n"
-            "2. **结构灵活**：除非用户要求，否则**不要**添加“摘要”、“关键词”、“参考文献”。\n"
+            "1. **完全遵循用户要求**：严格执行用户的字数、风格要求。\n"
+            "2. **结构清晰**：即使是一般论文，也请使用清晰的章节结构（大纲），不要写成无结构的散文。\n"
+            "3. **结构灵活**：除非用户要求，否则**不要**添加“摘要”、“关键词”、“参考文献”。\n"
         )
     elif doc_type == "学术论文":
         outline_sys += (
@@ -368,10 +385,10 @@ def get_system_prompts(doc_type, user_req=""):
             "【撰写原则】\n"
             "1. **严格控制字数**：必须符合用户指定的字数限制。\n"
             "2. **风格适配**：严格采用用户要求的语体风格。\n"
-            "3. **层级规范**：正文的一级标题请使用 Markdown 的 # (一个井号) 标记，二级标题使用 ## 标记。\n"
+            "3. **结构分明**：请务必使用 Markdown 的二级标题（##）来划分文章章节，不要把所有内容写成一大段散文。\n"
             "4. **禁止手动编号**：标题前不要加“1.”、“一、”等序号，由排版软件自动生成。\n"
             "5. **严禁在摘要前添加任何标题**：输出顺序必须严格为：\n"
-            "   [题目] -> [摘要](如有) -> [关键词](如有) -> [正文内容(从#开始)]\n"
+            "   [题目] -> [摘要](如有) -> [关键词](如有) -> [正文内容(从##开始)]\n"
             "   绝不允许在摘要之前出现“一、引言”或类似章节标题！\n"
         )
     else:
