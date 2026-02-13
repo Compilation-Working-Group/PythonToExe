@@ -14,13 +14,14 @@ DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
 class TTSApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("DeepSeek 智能语音合成助手 (修复布局版)")
+        # 1. 修改标题，增加作者信息
+        self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        # 1. 设置合理的初始大小和最小尺寸
+        # 设置合理的初始大小
         window_width = 850
         window_height = 600
         self.center_window(window_width, window_height)
-        self.root.minsize(800, 500) # 防止用户把窗口拖得太小
+        self.root.minsize(800, 500)
         
         # 变量初始化
         self.is_playing = False
@@ -32,7 +33,6 @@ class TTSApp:
         self.create_ui()
 
     def center_window(self, width, height):
-        """让窗口在屏幕居中显示"""
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width // 2) - (width // 2)
@@ -44,40 +44,47 @@ class TTSApp:
         self.loop.run_forever()
 
     def create_ui(self):
-        # === 布局核心策略：先放上下两头，最后放中间 ===
+        # === 布局核心策略：三明治布局 ===
 
-        # 1. 顶部区域 (Pack TOP)
+        # 1. 顶部区域
         frame_top = tk.LabelFrame(self.root, text="文件操作", padx=10, pady=5)
         frame_top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
         
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
 
-        # 2. 底部区域 (Pack BOTTOM) - 注意：先放最底下的，顺序是倒着来的
+        # 2. 底部区域 (倒序添加)
         
-        # 2.1 状态栏 (最底部)
-        self.status_label = tk.Label(self.root, text="状态: 就绪", bd=1, relief=tk.SUNKEN, anchor=tk.W, bg="#f0f0f0")
-        self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+        # 2.1 状态栏与作者信息 (最底部)
+        frame_status = tk.Frame(self.root, bd=1, relief=tk.SUNKEN, bg="#f0f0f0")
+        frame_status.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        self.status_label = tk.Label(frame_status, text="状态: 就绪", anchor=tk.W, bg="#f0f0f0")
+        self.status_label.pack(side=tk.LEFT, padx=5)
+        
+        # 增加作者信息标签
+        tk.Label(frame_status, text="Author: Yu JinQuan", anchor=tk.E, bg="#f0f0f0", fg="#666").pack(side=tk.RIGHT, padx=10)
 
-        # 2.2 语音合成与导出区 (倒数第二)
+        # 2.2 语音合成与导出区
         frame_bottom = tk.LabelFrame(self.root, text="语音合成与导出", padx=10, pady=5)
         frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 10))
         
         tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=12).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_bottom, text="⏹️ 停止 / 重置", command=self.stop_audio, bg="#ffcdd2", width=12).pack(side=tk.LEFT, padx=5)
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=15) # 分隔线
+        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=15)
+        
         tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="🎬 导出 WMV视频", command=lambda: self.export_audio("wmv")).pack(side=tk.LEFT, padx=5)
+        # 修改为导出 WAV
+        tk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav")).pack(side=tk.LEFT, padx=5)
 
-        # 2.3 AI 润色区 (倒数第三)
+        # 2.3 AI 润色区
         frame_ai = tk.LabelFrame(self.root, text="DeepSeek AI 润色", padx=10, pady=5)
         frame_ai.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
         
         tk.Label(frame_ai, text="提示: 将文本改写为更自然的口语风格").pack(side=tk.LEFT)
         tk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bg="#e3f2fd", fg="#0d47a1").pack(side=tk.RIGHT, padx=5)
 
-        # 3. 中间文本区 (Pack TOP, Expand=True) - 最后放这个！
-        # 这样它只会占用上下区域预留后剩下的空间
+        # 3. 中间文本区
         self.text_area = scrolledtext.ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD)
         self.text_area.pack(side=tk.TOP, expand=True, fill=tk.BOTH, padx=10, pady=5)
 
@@ -85,7 +92,7 @@ class TTSApp:
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 功能函数保持不变 ---
+    # --- 功能函数 ---
     def import_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text/Word", "*.txt *.docx")])
         if not file_path: return
@@ -135,14 +142,10 @@ class TTSApp:
                 stream=False
             )
             polished = response.choices[0].message.content
-            
-            def update_ui():
-                self.text_area.delete("1.0", tk.END)
-                self.text_area.insert(tk.END, polished)
-                self.update_status("润色完成")
-                messagebox.showinfo("完成", "DeepSeek 润色已完成！")
-            
-            self.root.after(0, update_ui)
+            self.root.after(0, lambda: self.text_area.delete("1.0", tk.END))
+            self.root.after(0, lambda: self.text_area.insert(tk.END, polished))
+            self.root.after(0, lambda: self.update_status("润色完成"))
+            self.root.after(0, lambda: messagebox.showinfo("完成", "DeepSeek 润色已完成！"))
             
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
@@ -167,9 +170,7 @@ class TTSApp:
                     self._generate_audio_task(text, self.temp_audio_file), self.loop
                 )
                 future.result() 
-                
                 if not self.is_generating: return
-
                 self.root.after(0, self._play_sound)
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
@@ -206,7 +207,8 @@ class TTSApp:
         text = self.text_area.get("1.0", tk.END).strip()
         if not text: return
 
-        ext = ".mp3" if fmt == "mp3" else ".wmv"
+        # 设置后缀名
+        ext = ".mp3" if fmt == "mp3" else ".wav"
         save_path = filedialog.asksaveasfilename(defaultextension=ext, filetypes=[(f"{fmt.upper()} File", f"*{ext}")])
         if not save_path: return
 
@@ -224,24 +226,22 @@ class TTSApp:
                     import shutil
                     shutil.move(temp_mp3, save_path)
                 
-                elif fmt == "wmv":
-                    self.root.after(0, lambda: self.update_status("正在渲染视频 (MoviePy)..."))
-                    from moviepy.editor import AudioFileClip, ColorClip
+                elif fmt == "wav":
+                    self.root.after(0, lambda: self.update_status("正在转换格式 (MoviePy)..."))
+                    from moviepy.editor import AudioFileClip
                     
+                    # 使用 moviepy 将 MP3 转换为 WAV
                     audio = AudioFileClip(temp_mp3)
-                    video = ColorClip(size=(640, 480), color=(0,0,0), duration=audio.duration)
-                    video = video.set_audio(audio)
-                    video.write_videofile(save_path, fps=1, codec="libx264", audio_codec="aac", logger=None)
-                    
+                    # pcm_s16le 是最通用的 WAV 编码
+                    audio.write_audiofile(save_path, codec='pcm_s16le', logger=None)
                     audio.close()
-                    video.close()
                     os.remove(temp_mp3)
 
                 self.root.after(0, lambda: messagebox.showinfo("成功", f"导出成功！\n保存路径: {save_path}"))
                 self.root.after(0, lambda: self.update_status("导出完成"))
             
             except ImportError:
-                 self.root.after(0, lambda: messagebox.showerror("组件缺失", "导出视频需要 moviepy 库，但在当前环境中未找到。"))
+                 self.root.after(0, lambda: messagebox.showerror("组件缺失", "导出音频需要 moviepy 库。"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("导出失败", f"错误详情:\n{str(e)}"))
                 self.root.after(0, lambda: self.update_status("导出失败"))
