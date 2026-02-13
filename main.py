@@ -61,7 +61,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     doc = Document()
 
     # ── 1. 页面设置 (Page Setup) ──
-    # A4纸, 上37mm, 下35mm, 左28mm, 右26mm
     section = doc.sections[0]
     section.page_width = Mm(210)
     section.page_height = Mm(297)
@@ -75,10 +74,7 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
     # ── 2. 基础字体设置辅助函数 ──
     def set_run_font(run, font_cn, font_en='Times New Roman', size_pt=16, bold=False):
-        """
-        设置中西文字体
-        size_pt=16 对应 三号字
-        """
+        """设置中西文字体, size_pt=16 对应 三号字"""
         run.font.name = font_en
         run._element.rPr.rFonts.set(qn('w:eastAsia'), font_cn)
         run.font.size = Pt(size_pt)
@@ -95,13 +91,12 @@ def save_as_docx(filepath: str, title: str, md_text: str):
     style_normal.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符
 
     # ── 3. 大标题排版 ──
-    # 二号方正小标宋简体, 居中, 22pt
     head_p = doc.add_paragraph()
     head_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     head_p.paragraph_format.first_line_indent = Pt(0)
     head_p.paragraph_format.line_spacing = Pt(28)
     head_p.paragraph_format.space_before = Pt(0)
-    head_p.paragraph_format.space_after = Pt(28) # 标题后空一行
+    head_p.paragraph_format.space_after = Pt(28)
 
     run_title = head_p.add_run(title)
     set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
@@ -126,15 +121,22 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if stripped == title:
             continue
         
+        # ── 预处理：判断是否为列表项并剥离符号 ──
+        # 解决 "* **加粗**" 导致的正则冲突
+        is_list_item = False
+        # 匹配以 * 或 - 开头，后跟空格的行
+        list_match = re.match(r"^[\*\-]\s+(.*)", stripped)
+        if list_match:
+            is_list_item = True
+            stripped = list_match.group(1) # 剥离列表符号，保留内容
+        
         # ── 特殊段落拦截：摘要、关键词、参考文献、结语等 ──
-        # 即使它们带了 # 号，也强行拦截，不给编号
-        clean_check = re.sub(r"^[#\s]+", "", stripped) # 去掉 # 和空格
-        clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?", "", clean_check).strip() # 去掉可能的原有序号
+        clean_check = re.sub(r"^[#\s]+", "", stripped)
+        clean_check = re.sub(r"^[\(（]?[一二三四五六七八九十\d]+[\)）\.]?", "", clean_check).strip()
 
         special_keywords = ["摘要", "关键词", "参考文献", "致谢", "Abstract", "Keywords", "References"]
         is_special = False
         
-        # 检查是否以特殊词开头
         for kw in special_keywords:
             if clean_check.startswith(kw):
                 is_special = True
@@ -143,22 +145,16 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if is_special:
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
-            p.paragraph_format.first_line_indent = Pt(32) # 保持首行缩进
+            p.paragraph_format.first_line_indent = Pt(32)
             
-            # 处理 "摘要：" 这种格式，加粗冒号前的部分
             if "：" in clean_check or ":" in clean_check:
                 sep = "：" if "：" in clean_check else ":"
                 parts = clean_check.split(sep, 1)
-                
-                # 标题部分 (如 "摘要：") 使用黑体，不加粗 (黑体本身就够重) 或 加粗
                 run_head = p.add_run(parts[0] + "：")
                 set_run_font(run_head, '黑体', size_pt=16, bold=False) 
-                
-                # 内容部分 使用仿宋
                 run_body = p.add_run(parts[1])
                 set_run_font(run_body, '仿宋_GB2312', size_pt=16, bold=False)
             else:
-                # 纯标题 (如 "参考文献")
                 run = p.add_run(clean_check)
                 set_run_font(run, '黑体', size_pt=16, bold=False)
             continue
@@ -168,9 +164,8 @@ def save_as_docx(filepath: str, title: str, md_text: str):
         if heading_match:
             level = len(heading_match.group(1))
             raw_text = heading_match.group(2)
-            # 清理正文中可能自带的 "1. " 或 "一、" 等，避免双重编号
             text_content = re.sub(r"^(\d+(\.\d+)*|[一二三四五六七八九十]+)[.、\s]\s*", "", raw_text)
-            text_content = _strip_inline(text_content)
+            text_content = _strip_inline(text_content) # 确保标题内无 Markdown
 
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = Pt(28)
@@ -179,8 +174,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
                 h1_counter += 1
                 h2_counter = 0
                 h3_counter = 0
-                
-                # 一级标题：三号黑体，缩进2字符，"一、"
                 p.paragraph_format.first_line_indent = Pt(32)
                 num_str = to_chinese_num(h1_counter)
                 run = p.add_run(f"{num_str}、{text_content}")
@@ -189,8 +182,6 @@ def save_as_docx(filepath: str, title: str, md_text: str):
             elif level == 2:
                 h2_counter += 1
                 h3_counter = 0
-                
-                # 二级标题：三号楷体，缩进2字符，"（一）"
                 p.paragraph_format.first_line_indent = Pt(32)
                 num_str = to_chinese_num(h2_counter)
                 run = p.add_run(f"（{num_str}）{text_content}")
@@ -198,30 +189,34 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
             elif level >= 3:
                 h3_counter += 1
-                
-                # 三级标题：三号仿宋加粗，缩进2字符，"1."
                 p.paragraph_format.first_line_indent = Pt(32)
                 run = p.add_run(f"{h3_counter}. {text_content}")
                 set_run_font(run, '仿宋_GB2312', size_pt=16, bold=True)
-
             continue
 
-        # ── 普通段落 ──
+        # ── 普通段落（含列表项处理） ──
         p = doc.add_paragraph()
+        
+        # 如果是列表项，处理缩进或加项目符号
+        if is_list_item:
+            # 方案：使用实心圆点作为项目符号，或者仅缩进
+            # 这里采用公文常见做法：不加点，但作为普通段落处理，内容前不留符号，
+            # 或者为了区分，可以在内容前加 "• "
+            # 考虑到用户之前的文档有 "•"，我们加上它，并保持标准缩进
+            stripped = "• " + stripped
+        
+        # 继承 Normal 样式
         _add_inline_runs_styled(p, stripped)
 
     # ── 5. 页码设置 ──
-    # 底端居中，格式：— 1 —
     def create_page_number_xml(run):
         fldChar1 = OxmlElement('w:fldChar')
         fldChar1.set(qn('w:fldCharType'), 'begin')
         run._element.append(fldChar1)
-
         instrText = OxmlElement('w:instrText')
         instrText.set(qn('xml:space'), 'preserve')
         instrText.text = "PAGE"
         run._element.append(instrText)
-
         fldChar2 = OxmlElement('w:fldChar')
         fldChar2.set(qn('w:fldCharType'), 'end')
         run._element.append(fldChar2)
@@ -245,22 +240,24 @@ def save_as_docx(filepath: str, title: str, md_text: str):
 
 
 def _strip_inline(text: str) -> str:
-    """去掉行内 Markdown 符号"""
-    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    """彻底去掉行内 Markdown 符号"""
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text) # 去粗体斜体
     text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    # 强制清除残留的 ** 或 * text = text.replace("**", "").replace("__", "")
     return text
 
 
 def _add_inline_runs_styled(paragraph, text: str):
-    """解析 Markdown 行内格式并应用到 Docx Run"""
+    """
+    解析 Markdown 行内格式并应用到 Docx Run
+    优化：防止列表符号 * 与加粗符号 ** 混淆
+    """
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
     
-    pattern = re.compile(r"(\*{1,3}[^*]+\*{1,3}|_{1,3}[^_]+_{1,3}|`[^`]+`)")
-    last = 0
-    
+    # 辅助函数：应用样式
     def apply_style(run, bold=False, italic=False, code=False):
         run.font.name = 'Times New Roman'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋_GB2312')
@@ -270,27 +267,46 @@ def _add_inline_runs_styled(paragraph, text: str):
         if italic: run.font.italic = True
         if code: run.font.name = 'Courier New'
 
+    # 1. 如果没有 Markdown 标记，直接添加
+    if not re.search(r"(\*|_|`)", text):
+        run = paragraph.add_run(text)
+        apply_style(run)
+        return
+
+    # 2. 简单的 Tokenizer 解析
+    # 匹配 **bold**, *italic*, `code`
+    # 优化正则：排除列表符号干扰，确保匹配成对
+    pattern = re.compile(r"(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`)")
+    
+    last_end = 0
     for m in pattern.finditer(text):
-        if m.start() > last:
-            r = paragraph.add_run(text[last:m.start()])
-            apply_style(r)
+        start, end = m.span()
+        # 添加前面的普通文本
+        if start > last_end:
+            run = paragraph.add_run(text[last_end:start])
+            apply_style(run)
+        
         token = m.group()
-        if token.startswith("***") or token.startswith("___"):
-            r = paragraph.add_run(token[3:-3])
-            apply_style(r, bold=True, italic=True)
-        elif token.startswith("**") or token.startswith("__"):
-            r = paragraph.add_run(token[2:-2])
-            apply_style(r, bold=True)
+        # 判断类型
+        if token.startswith("**") or token.startswith("__"):
+            content = token[2:-2]
+            run = paragraph.add_run(content)
+            apply_style(run, bold=True)
         elif token.startswith("*") or token.startswith("_"):
-            r = paragraph.add_run(token[1:-1])
-            apply_style(r, italic=True)
+            content = token[1:-1]
+            run = paragraph.add_run(content)
+            apply_style(run, italic=True)
         elif token.startswith("`"):
-            r = paragraph.add_run(token[1:-1])
-            apply_style(r, code=True)
-        last = m.end()
-    if last < len(text):
-        r = paragraph.add_run(text[last:])
-        apply_style(r)
+            content = token[1:-1]
+            run = paragraph.add_run(content)
+            apply_style(run, code=True)
+            
+        last_end = end
+
+    # 添加剩余文本
+    if last_end < len(text):
+        run = paragraph.add_run(text[last_end:])
+        apply_style(run)
 
 
 # ── 主题配置 ────────────────────────────────────────────────────────────────
@@ -299,7 +315,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.3.1"
+APP_VERSION = "v2.3.2"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -351,7 +367,7 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-# ── 提示词系统 (Prompts) - 优化指令 ──────────────────────────────────────────
+# ── 提示词系统 (Prompts) ────────────────────────────────────────────────────
 OUTLINE_SYSTEM = (
     "你是一位资深写作顾问，擅长为各类专业文稿设计清晰、合理的结构大纲。\n\n"
     "请根据用户提供的文稿类型、题目和要求，输出一份层次分明的大纲。\n\n"
