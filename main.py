@@ -1,11 +1,12 @@
 import sys
 import os
 
-# --- 针对 Linux/PyInstaller 丢失模块的强制导入 ---
+# --- 针对 Linux/PyInstaller 兼容性的强制导入 ---
 try:
     import PIL._tkinter_finder
 except ImportError:
     pass
+import PIL.ImageTk  # 显式引入，防止运行时图片库报错
 # -------------------------------------------------------
 
 import threading
@@ -22,24 +23,24 @@ from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 
-# --- 字体自动适配 ---
+# --- 字体自动适配 (防止Linux乱码) ---
 DEFAULT_FONT = "Helvetica"
 SYSTEM_PLATFORM = sys.platform
 if SYSTEM_PLATFORM.startswith('win'):
     MAIN_FONT_NAME = "微软雅黑"
     UI_FONT_SIZE = 9
-elif SYSTEM_PLATFORM.startswith('darwin'):
+elif SYSTEM_PLATFORM.startswith('darwin'): # macOS
     MAIN_FONT_NAME = "PingFang SC"
     UI_FONT_SIZE = 11
-else:
-    MAIN_FONT_NAME = "WenQuanYi Micro Hei"
+else: # Linux
+    MAIN_FONT_NAME = "WenQuanYi Micro Hei" # Linux 常用中文字体
     UI_FONT_SIZE = 10
 
 class LessonPlanWriter(ttk.Window):
     def __init__(self):
-        super().__init__(themename="superhero") # 保持深色主题，专业感强
-        self.title("金塔县中学教案智能生成系统 v2.0")
-        self.geometry("1350x900")
+        super().__init__(themename="superhero") # 深色主题
+        self.title("金塔县中学教案智能生成系统 v3.0 (Final)")
+        self.geometry("1350x950")
         
         # 核心数据存储
         self.lesson_data = {} 
@@ -111,6 +112,7 @@ class LessonPlanWriter(ttk.Window):
         ttk.Button(action_frame, text="ℹ️ 关于作者", command=self.show_author, bootstyle="info outline").pack(fill=X, pady=2)
 
         # ================= 中间主体 (Body) =================
+        # Linux下必须用 Panedwindow (小写w)
         main_pane = ttk.Panedwindow(self, orient=HORIZONTAL)
         main_pane.pack(fill=BOTH, expand=True, padx=15, pady=5)
         
@@ -123,9 +125,12 @@ class LessonPlanWriter(ttk.Window):
         scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=left_canvas.yview)
         self.scrollable_frame = ttk.Frame(left_canvas)
         self.scrollable_frame.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
-        left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=left_canvas.winfo_reqwidth())
-        # 绑定宽度自适应
-        left_canvas.bind('<Configure>', lambda e: left_canvas.itemconfig(left_canvas.create_window((0,0), window=self.scrollable_frame, anchor="nw"), width=e.width))
+        
+        # 宽度自适应 Hack
+        left_canvas_window = left_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        def configure_canvas(event):
+            left_canvas.itemconfig(left_canvas_window, width=event.width)
+        left_canvas.bind('<Configure>', configure_canvas)
         
         left_canvas.configure(yscrollcommand=scrollbar.set)
         left_canvas.pack(side="left", fill="both", expand=True)
@@ -199,7 +204,7 @@ class LessonPlanWriter(ttk.Window):
     # --- 逻辑处理 ---
 
     def show_author(self):
-        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：2.0.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
+        messagebox.showinfo("关于作者", f"{self.author_info}\n\n版本：3.0.0 (Linux/Win/Mac)\n适用：金塔县中学教案模版标准")
 
     def update_period_list(self):
         try:
@@ -242,11 +247,13 @@ class LessonPlanWriter(ttk.Window):
                 self.process_text.insert("1.0", data['process'])
 
     def clean_text(self, text):
+        """清洗Markdown和多余符号"""
         text = text.replace("**", "").replace("__", "")
         text = text.replace("```json", "").replace("```", "")
         lines = []
         for line in text.split('\n'):
             clean_line = line.strip()
+            # 移除行首的标题符号 #
             while clean_line.startswith("#"):
                 clean_line = clean_line[1:].strip()
             lines.append(clean_line)
@@ -308,7 +315,7 @@ class LessonPlanWriter(ttk.Window):
         
         content_instruction = ""
         if custom_content:
-            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计。"
+            content_instruction = f"【特别指令】用户强制指定本课时(第{current_p}课时)内容为：『{custom_content}』。请只围绕此内容设计，忽略其他课时的内容。"
         else:
             content_instruction = f"请根据教学逻辑，自动规划第{current_p}课时（共{total_p}课时）的核心内容。"
 
@@ -319,7 +326,7 @@ class LessonPlanWriter(ttk.Window):
         【核心要求】
         1. **素养导向**：严禁使用“三维目标”分类。请用一段通顺的话描述“通过...培养...素养”。
         2. 格式：纯文本，无Markdown。
-        3. 返回JSON格式：
+        3. 返回JSON格式，Key必须保持一致：
         {{
             "chapter": "所属章节",
             "objectives": "素养导向目标",
@@ -430,12 +437,14 @@ class LessonPlanWriter(ttk.Window):
             self.is_generating = False
 
     def export_word(self):
+        # 强制保存当前页
         self.save_current_data_to_memory(self.active_period)
         filename = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word Document", "*.docx")])
         if not filename: return
 
         try:
             doc = Document()
+            # 设置中文字体
             doc.styles['Normal'].font.name = u'宋体'
             doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
             
@@ -477,7 +486,7 @@ class LessonPlanWriter(ttk.Window):
 
                 # R3 课标
                 table.cell(2, 0).merge(table.cell(2, 3))
-                table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '（根据新课标自动匹配）')}" 
+                table.cell(2, 0).text = f"课程标准:\n{data.get('standard', '（AI匹配新课标要求）')}" 
 
                 # R4 目标
                 table.cell(3, 0).merge(table.cell(3, 3))
