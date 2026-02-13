@@ -2,3 +2,4 @@ requests
 python-docx
 ttkbootstrap
 pyinstaller
+Pillow
