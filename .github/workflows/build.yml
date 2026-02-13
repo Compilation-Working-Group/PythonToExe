@@ -12,9 +12,9 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
 
     steps:
-    - uses: actions/checkout@4
+    - uses: actions/checkout@v4  # 修正：添加v前缀
     - name: 设置 Python
-      uses: actions/setup-python@5
+      uses: actions/setup-python@v5  # 修正：添加v前缀
       with:
         python-version: '3.10'
     - name: 安装依赖
@@ -22,7 +22,7 @@ jobs:
     - name: PyInstaller 打包
       run: pyinstaller --onefile --windowed --name="PaperWriter" main.py
     - name: 上传打包产物
-      uses: actions/upload-artifact@4
+      uses: actions/upload-artifact@v4  # 修正：添加v前缀
       with:
         name: build-${{ matrix.os }}
         path: dist/*
