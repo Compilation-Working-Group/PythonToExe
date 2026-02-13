@@ -9,9 +9,9 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog, QFormLayout
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QMutex, QMutexLocker
+    Qt, QThread, pyqtSignal
 )
-from PyQt6.QtGui import QFont, QInputMethod
+from PyQt6.QtGui import QFont
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -21,35 +21,22 @@ from docx.oxml.ns import qn
 CONFIG_PATH = "config.json"
 # ======================================================
 
-# ===================== 流式API调用线程（线程安全版） =====================
+# ===================== 流式API调用线程 =====================
 class StreamAPICaller(QThread):
-    """流式API调用线程（线程安全+异常防护）"""
+    """流式API调用线程（避免界面卡死）"""
     new_content = pyqtSignal(str)  # 新内容信号
     finished_signal = pyqtSignal(bool, str)  # 完成信号（是否成功，错误信息）
-    
+    stopped = False  # 终止标记
+
     def __init__(self, api_key, prompt):
         super().__init__()
         self.api_key = api_key
         self.prompt = prompt
         self.session = requests.Session()
         self.request = None
-        self._stopped = False
-        self._mutex = QMutex()  # 线程安全锁
-
-    @property
-    def stopped(self):
-        """线程安全获取停止状态"""
-        locker = QMutexLocker(self._mutex)
-        return self._stopped
-
-    @stopped.setter
-    def stopped(self, value):
-        """线程安全设置停止状态"""
-        locker = QMutexLocker(self._mutex)
-        self._stopped = value
 
     def run(self):
-        """线程执行函数：流式调用DeepSeek API（带完整异常防护）"""
+        """线程执行函数：流式调用DeepSeek API"""
         self.stopped = False
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -73,33 +60,26 @@ class StreamAPICaller(QThread):
             )
             self.request.raise_for_status()
 
-            # 逐行解析流式响应（增加停止检测频率）
-            for line in self.request.iter_lines(chunk_size=1):
-                # 检测终止信号（线程安全）
-                if self.stopped:
+            # 逐行解析流式响应
+            for line in self.request.iter_lines():
+                if self.stopped:  # 检测终止信号
                     self.finished_signal.emit(False, "已终止撰写")
                     return
-                if not line:
-                    continue
-                try:
+                if line:
                     line = line.decode('utf-8').strip()
                     if line.startswith('data: '):
                         line = line[6:]
                         if line == '[DONE]':
                             break
-                        if not line:
+                        try:
+                            json_data = json.loads(line)
+                            if 'choices' in json_data and len(json_data['choices']) > 0:
+                                delta = json_data['choices'][0].get('delta', {})
+                                content = delta.get('content', '')
+                                if content:
+                                    self.new_content.emit(content)  # 发送新内容
+                        except json.JSONDecodeError:
                             continue
-                        json_data = json.loads(line)
-                        if 'choices' in json_data and len(json_data['choices']) > 0:
-                            delta = json_data['choices'][0].get('delta', {})
-                            content = delta.get('content', '')
-                            if content:
-                                self.new_content.emit(content)  # 发送新内容
-                except json.JSONDecodeError:
-                    continue
-                except Exception as e:
-                    print(f"解析响应行失败: {e}")
-                    continue
 
             self.finished_signal.emit(True, "")
         except RequestException as e:
@@ -114,28 +94,15 @@ class StreamAPICaller(QThread):
         except Exception as e:
             self.finished_signal.emit(False, f"未知错误：{str(e)}")
         finally:
-            # 安全关闭请求（防止空指针）
-            try:
-                if self.request:
-                    self.request.close()
-                self.session.close()
-            except:
-                pass
-
-    def stop(self):
-        """安全终止API调用（无报错）"""
-        self.stopped = True
-        # 优雅关闭连接
-        try:
+            # 关闭请求
             if self.request:
                 self.request.close()
-            self.session.close()
-        except:
-            pass
-        # 等待线程结束
-        if self.isRunning():
-            self.quit()
-            self.wait(1000)  # 最多等待1秒
+
+    def stop(self):
+        """终止API调用"""
+        self.stopped = True
+        if self.request:
+            self.request.close()
 
 # ===================== 配置管理 =====================
 class ConfigManager:
@@ -160,9 +127,9 @@ class ConfigManager:
         except Exception as e:
             QMessageBox.critical(None, "错误", f"保存配置失败: {str(e)}")
 
-# ===================== API设置弹窗（优化中文输入） =====================
+# ===================== API设置弹窗 =====================
 class APISettingDialog(QDialog):
-    """API Key 设置弹窗（深度适配中文输入）"""
+    """API Key 设置弹窗（适配中文输入）"""
     def __init__(self, current_key):
         super().__init__()
         self.setWindowTitle("API 设置")
@@ -174,16 +141,14 @@ class APISettingDialog(QDialog):
         layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
-        # API Key 输入框（深度适配中文输入）
+        # API Key 输入框（强制启用中文输入）
         self.key_input = QLineEdit()
         self.key_input.setPlaceholderText("请输入 DeepSeek API Key（支持中文粘贴）")
         self.key_input.setText(self.api_key)
         self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        # Linux中文输入核心配置
+        # 修复Linux中文输入核心：启用输入法
         self.key_input.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         self.key_input.setAttribute(Qt.WidgetAttribute.WA_KeyCompression, False)
-        self.key_input.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, True)
-        self.key_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # 强焦点
         form_layout.addRow("DeepSeek API Key：", self.key_input)
 
         # 保存按钮
@@ -193,8 +158,6 @@ class APISettingDialog(QDialog):
 
         layout.addLayout(form_layout)
         self.setLayout(layout)
-        # 弹窗显示时自动聚焦输入框
-        self.key_input.setFocus()
 
     def save_key(self):
         key = self.key_input.text().strip()
@@ -205,18 +168,15 @@ class APISettingDialog(QDialog):
         QMessageBox.information(self, "成功", "API Key 已保存，下次启动自动加载！")
         self.accept()
 
-# ===================== 主窗口（优化中文输入+终止逻辑） =====================
+# ===================== 主窗口 =====================
 class PaperWriter(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = ConfigManager.load_config()
         self.DEEPSEEK_API_KEY = self.config.get("deepseek_api_key", "")
         self.stream_thread = None  # 流式调用线程
-        self.setWindowTitle("智能公文/论文撰写工具 | 流式输出 | Linux中文适配")
+        self.setWindowTitle("智能公文/论文撰写工具 | 流式输出 | 多平台兼容")
         self.setMinimumSize(950, 780)
-        # 启用全局输入法
-        self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.init_ui()
         self.init_signal_slots()
 
@@ -224,8 +184,6 @@ class PaperWriter(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        # 启用输入法
-        central_widget.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
 
         # ========== 顶部：API 设置 + 状态 ==========
         top_layout = QHBoxLayout()
@@ -237,14 +195,12 @@ class PaperWriter(QMainWindow):
         top_layout.addWidget(self.setting_btn)
         layout.addLayout(top_layout)
 
-        # ========== 文稿类型（优化中文输入） ==========
+        # ========== 文稿类型 ==========
         type_layout = QHBoxLayout()
         type_label = QLabel("文稿类型：")
         self.type_combo = QComboBox()
-        # 中文输入适配
+        # 修复中文输入/显示
         self.type_combo.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        self.type_combo.setAttribute(Qt.WidgetAttribute.WA_KeyCompression, False)
-        self.type_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.type_combo.addItems([
             "期刊论文", "工作计划", "工作总结", "学习反思", "教学案例", "汇报材料", "自定义"
         ])
@@ -252,18 +208,14 @@ class PaperWriter(QMainWindow):
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
 
-        # ========== 题目输入（深度适配中文输入） ==========
+        # ========== 题目输入（修复中文输入） ==========
         title_layout = QHBoxLayout()
         title_label = QLabel("题目/要求：")
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("输入完整题目或详细要求，例如：2026年度部门工作总结")
-        # Linux中文输入核心配置
+        # 核心：启用输入法 + 禁用按键压缩（Linux中文输入关键）
         self.title_input.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         self.title_input.setAttribute(Qt.WidgetAttribute.WA_KeyCompression, False)
-        self.title_input.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, True)
-        self.title_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # 启用自动补全（辅助输入）
-        self.title_input.setCompleter(None)
         title_layout.addWidget(title_label)
         title_layout.addWidget(self.title_input)
         layout.addLayout(title_layout)
@@ -277,16 +229,12 @@ class PaperWriter(QMainWindow):
         outline_btn_layout.addWidget(self.stop_outline_btn)
         layout.addLayout(outline_btn_layout)
 
-        # ========== 大纲编辑区（深度适配中文输入） ==========
+        # ========== 大纲编辑区（修复中文输入） ==========
         layout.addWidget(QLabel("📝 大纲（纯文本公文层级，可直接修改）："))
         self.outline_edit = QTextEdit()
         self.outline_edit.setPlaceholderText("大纲格式：一、 →（一）→1. →（1），禁止使用Markdown")
-        # 中文输入适配
         self.outline_edit.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         self.outline_edit.setAttribute(Qt.WidgetAttribute.WA_KeyCompression, False)
-        self.outline_edit.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # 设置输入法提示
-        self.outline_edit.inputMethodQuery(Qt.InputMethodQuery.InputMethodHints)
         layout.addWidget(self.outline_edit)
 
         # ========== 全文操作按钮组 ==========
@@ -298,13 +246,11 @@ class PaperWriter(QMainWindow):
         fulltext_btn_layout.addWidget(self.stop_write_btn)
         layout.addLayout(fulltext_btn_layout)
 
-        # ========== 文稿展示（深度适配中文输入） ==========
+        # ========== 文稿展示 ==========
         layout.addWidget(QLabel("📄 完整文稿（纯文本无格式）："))
         self.result_text = QTextEdit()
-        # 中文输入适配
         self.result_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         self.result_text.setAttribute(Qt.WidgetAttribute.WA_KeyCompression, False)
-        self.result_text.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout.addWidget(self.result_text)
 
         # ========== 导出 + 清空按钮组 ==========
@@ -362,11 +308,11 @@ class PaperWriter(QMainWindow):
             self.result_text.clear()
 
     def start_stream_thread(self, prompt, is_outline=True):
-        """启动流式调用线程（安全版）"""
-        # 停止已有线程（无报错）
-        if self.stream_thread:
+        """启动流式调用线程"""
+        # 停止已有线程
+        if self.stream_thread and self.stream_thread.isRunning():
             self.stream_thread.stop()
-            self.stream_thread = None
+            self.stream_thread.wait()
 
         # 初始化UI状态
         if is_outline:
@@ -397,7 +343,7 @@ class PaperWriter(QMainWindow):
             self.result_text.verticalScrollBar().setValue(self.result_text.verticalScrollBar().maximum())
 
     def stream_finished(self, success, error_msg, is_outline):
-        """流式调用完成后的处理（无报错）"""
+        """流式调用完成后的处理"""
         # 恢复按钮状态
         if is_outline:
             self.outline_btn.setEnabled(True)
@@ -406,34 +352,19 @@ class PaperWriter(QMainWindow):
             self.write_btn.setEnabled(True)
             self.stop_write_btn.setEnabled(False)
 
-        # 清空线程引用
-        self.stream_thread = None
-
-        # 显示错误信息（仅当有错误时）
-        if not success and error_msg and error_msg != "已终止撰写":
+        # 显示错误信息
+        if not success and error_msg:
             QMessageBox.critical(self, "错误", error_msg)
 
     def stop_outline_generation(self):
-        """终止大纲生成（无报错）"""
+        """终止大纲生成"""
         if self.stream_thread and self.stream_thread.isRunning():
             self.stream_thread.stop()
-            # 立即恢复按钮状态
-            self.outline_btn.setEnabled(True)
-            self.stop_outline_btn.setEnabled(False)
-            # 提示终止成功
-            QMessageBox.information(self, "提示", "大纲生成已终止")
-        self.stream_thread = None
 
     def stop_fulltext_generation(self):
-        """终止全文撰写（无报错）"""
+        """终止全文撰写"""
         if self.stream_thread and self.stream_thread.isRunning():
             self.stream_thread.stop()
-            # 立即恢复按钮状态
-            self.write_btn.setEnabled(True)
-            self.stop_write_btn.setEnabled(False)
-            # 提示终止成功
-            QMessageBox.information(self, "提示", "文稿撰写已终止")
-        self.stream_thread = None
 
     def generate_outline(self):
         """生成大纲（流式）"""
@@ -561,35 +492,17 @@ class PaperWriter(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"导出失败：{str(e)}")
 
-# ===================== 主程序入口（终极中文输入适配） =====================
+# ===================== 主程序入口 =====================
 if __name__ == "__main__":
-    # Linux中文输入强制适配（必须在QApplication创建前设置环境变量）
-    if os.name == "posix":
-        # 设置QT输入法模块（适配fcitx/ibus）
-        os.environ.setdefault('QT_IM_MODULE', 'fcitx')
-        os.environ.setdefault('XMODIFIERS', '@im=fcitx')
-        os.environ.setdefault('GTK_IM_MODULE', 'fcitx')
-        # 禁用QT的输入法兼容性层
-        os.environ.setdefault('QT_NO_IM_MODULE', '0')
-
-    # 创建应用实例
+    # 纯PyQt6初始化，无任何PyQt5旧属性
     app = QApplication(sys.argv)
     
-    # 全局中文适配
+    # 适配Linux系统中文显示
     if os.name == "posix":
         # 设置系统中文字体
         font = QFont("Noto Sans CJK SC")
-        font.setPointSize(10)
         app.setFont(font)
-        # 启用高DPI适配
-        app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
 
-    # 启动主窗口
     window = PaperWriter()
     window.show()
-    
-    # 强制激活输入法
-    input_method = QInputMethod()
-    input_method.setVisible(True)
-    
     sys.exit(app.exec())
