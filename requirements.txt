@@ -3,9 +3,6 @@ edge-tts
 pygame
 python-docx
 openai
-# 锁定 moviepy 版本以保证稳定性
-moviepy<2.0
-imageio
+pydub
 imageio-ffmpeg
-# 打包工具
 pyinstaller
