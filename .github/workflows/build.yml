@@ -13,12 +13,20 @@ jobs:
           - os: windows-latest
             name: Windows
             ext: .exe
+            # Windows 不需要那个 Linux 特有的 hidden-import
+            args: --hidden-import=PIL.ImageTk
+          
           - os: macos-latest
             name: macOS
             ext: ""
+            # macOS 也不需要
+            args: --hidden-import=PIL.ImageTk
+          
           - os: ubuntu-latest
             name: Linux
             ext: ""
+            # 【关键】只有 Linux 需要强制引入 PIL._tkinter_finder
+            args: --hidden-import=PIL._tkinter_finder --hidden-import=PIL.ImageTk
 
     runs-on: ${{ matrix.os }}
 
@@ -36,9 +44,9 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # 增加 --hidden-import=PIL._tkinter_finder 修复 Linux 下找不到模块的错误
+      # 使用 ${{ matrix.args }} 动态插入不同系统需要的参数
       run: |
-        pyinstaller --noconfirm --onefile --windowed --hidden-import=PIL._tkinter_finder --name "JintaLessonWriter-${{ matrix.name }}" main.py
+        pyinstaller --noconfirm --onefile --windowed ${{ matrix.args }} --name "JintaLessonWriter-${{ matrix.name }}" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
