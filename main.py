@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 AI 写作助手 - 智能文稿创作平台
 支持 Anthropic Claude、DeepSeek、OpenAI 及自定义兼容接口
@@ -13,156 +14,146 @@ import os
 import re
 from datetime import datetime
 
+# ── 引入 docx 相关库用于公文排版 ──────────────────────────────────────────────
+from docx import Document
+from docx.shared import Pt, Mm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+
 
 # ── Markdown 转纯文本工具 ────────────────────────────────────────────────────
 def md_to_plain(text: str) -> str:
     """将 Markdown 文本转换为干净的纯文本"""
-    # 删除代码块
     text = re.sub(r"```[\s\S]*?```", lambda m: m.group().replace("```", "").strip(), text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
-    # 标题：去掉 # 前缀，保留文字
     text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
-    # 粗体 / 斜体
     text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
     text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
-    # 链接 [text](url) → text
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
-    # 图片 ![alt](url) → alt
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    # 引用块
     text = re.sub(r"^>+\s?", "", text, flags=re.MULTILINE)
-    # 有序 / 无序列表符号
     text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
-    # 水平分割线
     text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
-    # HTML 标签
     text = re.sub(r"<[^>]+>", "", text)
-    # 清理多余空行（超过2个连续空行合并为1个）
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+# ── 公文格式化保存核心逻辑 ────────────────────────────────────────────────────
 def save_as_docx(filepath: str, title: str, md_text: str):
-    """将 Markdown 文本转换并保存为 Word 文档（标准公文格式）"""
-    from docx import Document
-    from docx.shared import Pt, Mm, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
-    from docx.oxml.ns import qn
-
+    """
+    将 Markdown 转换为符合《党政机关公文格式》标准的 Word 文档
+    规范参考：GB/T 9704-2012
+    """
+    
     doc = Document()
 
-    # ── 设置页面格式（A4纸，公文标准边距）──
+    # ── 1. 页面设置 (Page Setup) ──
     section = doc.sections[0]
-    section.page_height = Mm(297)      # A4 高度
-    section.page_width = Mm(210)       # A4 宽度
-    section.top_margin = Mm(37)        # 上边距 37mm
-    section.bottom_margin = Mm(35)     # 下边距 35mm
-    section.left_margin = Mm(28)       # 左边距 28mm
-    section.right_margin = Mm(26)      # 右边距 26mm
+    section.page_width = Mm(210)
+    section.page_height = Mm(297)
+    section.top_margin = Mm(37)
+    section.bottom_margin = Mm(35)
+    section.left_margin = Mm(28)
+    section.right_margin = Mm(26)
 
-    # ── 文档标题（2号小标宋，居中，无下划线）──
-    title_para = doc.add_paragraph()
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_para.add_run(title)
-    
-    # 设置标题字体：2号小标宋（22磅）
-    title_run.font.size = Pt(22)
-    title_run.font.name = '小标宋体'
-    title_run._element.rPr.rFonts.set(qn('w:eastAsia'), '小标宋体')
-    title_run.font.bold = False
-    title_run.font.color.rgb = RGBColor(0, 0, 0)
-    
-    # 设置标题段落格式（28磅行距）
-    title_para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    title_para.paragraph_format.line_spacing = Pt(28)
-    
-    # 标题后空两行
-    doc.add_paragraph()
-    doc.add_paragraph()
+    # 开启奇偶页页眉页脚不同
+    doc.settings.odd_and_even_pages_header_footer = True
 
-    # ── 逐行解析 Markdown 转为 Word 格式 ──
-    for line in md_text.splitlines():
+    # ── 2. 基础样式定义 (Styles) ──
+    def set_run_font(run, font_cn, font_en='Times New Roman', size_pt=16, bold=False):
+        run.font.name = font_en
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), font_cn)
+        run.font.size = Pt(size_pt)
+        run.font.bold = bold
+        run.font.color.rgb = RGBColor(0, 0, 0)
+
+    # 修改默认样式 'Normal' 为公文正文样式
+    style_normal = doc.styles['Normal']
+    style_normal.font.name = 'Times New Roman'
+    style_normal.element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+    style_normal.font.size = Pt(16)
+    style_normal.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    style_normal.paragraph_format.line_spacing = Pt(28)
+    style_normal.paragraph_format.first_line_indent = Pt(32)
+
+    # ── 3. 标题排版 (Main Title) ──
+    head_p = doc.add_paragraph()
+    head_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    head_p.paragraph_format.first_line_indent = Pt(0)
+    head_p.paragraph_format.line_spacing = Pt(28)
+    head_p.paragraph_format.space_before = Pt(0)
+    head_p.paragraph_format.space_after = Pt(28) 
+
+    run_title = head_p.add_run(title)
+    set_run_font(run_title, '方正小标宋简体', size_pt=22, bold=False)
+
+    # ── 4. 正文内容解析与转换 ──
+    lines = md_text.splitlines()
+    for line in lines:
         stripped = line.rstrip()
-
-        # 水平线
+        
         if re.match(r"^[-*_]{3,}\s*$", stripped):
-            p = doc.add_paragraph("─" * 40)
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
-        # 公文层级标题识别
-        official_heading = _match_official_heading(stripped)
-        if official_heading:
-            level, heading_text = official_heading
-            p = doc.add_paragraph()
-            run = p.add_run(heading_text)
-            
-            # 根据层级设置字体（3号 = 16磅）
-            if level == 1:  # 一、 → 3号黑体
-                _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
-            elif level == 2:  # （一） → 3号楷体
-                _set_run_format(run, font_name='楷体', font_size=Pt(16))
-            else:  # 1. 或 （1） → 3号仿宋
-                _set_run_format(run, font_name='仿宋', font_size=Pt(16))
-            
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
-            continue
-
-        # Markdown 标题级别（#）
+        # 识别标题 (#)
         heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
         if heading_match:
             level = len(heading_match.group(1))
-            heading_text = _strip_inline(heading_match.group(2))
-            p = doc.add_paragraph()
-            run = p.add_run(heading_text)
+            text = _strip_inline(heading_match.group(2))
             
-            # 一级标题用黑体，其他用仿宋
+            p = doc.add_paragraph()
+            p.paragraph_format.line_spacing = Pt(28)
+            p.paragraph_format.first_line_indent = Pt(32)
+
+            run = p.add_run(text)
+            
             if level == 1:
-                _set_run_format(run, font_name='黑体', font_size=Pt(16), bold=True)
+                set_run_font(run, 'SimHei', size_pt=16) 
+            elif level == 2:
+                set_run_font(run, 'KaiTi', size_pt=16)
             else:
-                _set_run_format(run, font_name='仿宋', font_size=Pt(16), bold=True)
+                set_run_font(run, '仿宋', size_pt=16, bold=True)
+            continue
             
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
-            continue
-
-        # 有序列表
-        ol_match = re.match(r"^\s*\d+\.\s+(.*)", stripped)
-        if ol_match:
-            p = doc.add_paragraph(style="List Number")
-            run = p.add_run(_strip_inline(ol_match.group(1)))
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
-            continue
-
-        # 无序列表
-        ul_match = re.match(r"^\s*[-*+]\s+(.*)", stripped)
-        if ul_match:
-            p = doc.add_paragraph(style="List Bullet")
-            run = p.add_run(_strip_inline(ul_match.group(1)))
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
-            continue
-
-        # 引用块
-        if stripped.startswith(">"):
-            p = doc.add_paragraph()
-            p.paragraph_format.left_indent = Pt(24)
-            run = p.add_run(_strip_inline(re.sub(r"^>+\s?", "", stripped)))
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
-            continue
-
-        # 空行
         if not stripped:
-            p = doc.add_paragraph()
-            _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
             continue
 
-        # 普通段落（3号仿宋，处理行内格式）
+        # 普通段落 (正文)
         p = doc.add_paragraph()
-        _add_inline_runs(p, stripped)
-        _set_paragraph_format(p, font_name='仿宋', font_size=Pt(16))
+        _add_inline_runs_styled(p, stripped)
+
+    # ── 5. 页码设置 (Page Numbers) ──
+    def create_page_number_xml(run):
+        fldChar1 = OxmlElement('w:fldChar')
+        fldChar1.set(qn('w:fldCharType'), 'begin')
+        run._element.append(fldChar1)
+
+        instrText = OxmlElement('w:instrText')
+        instrText.set(qn('xml:space'), 'preserve')
+        instrText.text = "PAGE"
+        run._element.append(instrText)
+
+        fldChar2 = OxmlElement('w:fldChar')
+        fldChar2.set(qn('w:fldCharType'), 'end')
+        run._element.append(fldChar2)
+
+    def setup_footer(footer, alignment):
+        p = footer.paragraphs[0]
+        p.alignment = alignment
+        p.paragraph_format.first_line_indent = 0
+        r1 = p.add_run("— ") 
+        set_run_font(r1, 'SimSun', size_pt=14)
+        r2 = p.add_run()
+        set_run_font(r2, 'SimSun', size_pt=14)
+        create_page_number_xml(r2)
+        r3 = p.add_run(" —")
+        set_run_font(r3, 'SimSun', size_pt=14)
+
+    setup_footer(section.footer, WD_ALIGN_PARAGRAPH.RIGHT)
+    setup_footer(section.even_page_footer, WD_ALIGN_PARAGRAPH.LEFT)
 
     doc.save(filepath)
 
@@ -176,89 +167,48 @@ def _strip_inline(text: str) -> str:
     return text
 
 
-def _add_inline_runs(paragraph, text: str):
-    """解析行内粗体/斜体，为 Word 段落添加格式化 run"""
-    from docx.shared import Pt
+def _add_inline_runs_styled(paragraph, text: str):
+    """解析 Markdown 行内格式并应用到 Docx Run"""
     from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
     
-    # 简单状态机：识别 **bold** 和 *italic*
     pattern = re.compile(r"(\*{1,3}[^*]+\*{1,3}|_{1,3}[^_]+_{1,3}|`[^`]+`)")
     last = 0
+    
+    def apply_style(run, bold=False, italic=False, code=False):
+        run.font.name = 'Times New Roman'
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+        run.font.size = Pt(16)
+        run.font.color.rgb = RGBColor(0,0,0)
+        
+        if bold: run.font.bold = True
+        if italic: run.font.italic = True
+        if code:
+             run.font.name = 'Courier New'
+
     for m in pattern.finditer(text):
         if m.start() > last:
-            run = paragraph.add_run(text[last:m.start()])
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            r = paragraph.add_run(text[last:m.start()])
+            apply_style(r)
+            
         token = m.group()
         if token.startswith("***") or token.startswith("___"):
-            run = paragraph.add_run(token[3:-3])
-            run.bold, run.italic = True, True
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            r = paragraph.add_run(token[3:-3])
+            apply_style(r, bold=True, italic=True)
         elif token.startswith("**") or token.startswith("__"):
-            run = paragraph.add_run(token[2:-2])
-            run.bold = True
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            r = paragraph.add_run(token[2:-2])
+            apply_style(r, bold=True)
         elif token.startswith("*") or token.startswith("_"):
-            run = paragraph.add_run(token[1:-1])
-            run.italic = True
-            _set_run_format(run, font_name='仿宋', font_size=Pt(16))
+            r = paragraph.add_run(token[1:-1])
+            apply_style(r, italic=True)
         elif token.startswith("`"):
-            run = paragraph.add_run(token[1:-1])
-            run.font.name = "Courier New"
+            r = paragraph.add_run(token[1:-1])
+            apply_style(r, code=True)
         last = m.end()
+        
     if last < len(text):
-        run = paragraph.add_run(text[last:])
-        _set_run_format(run, font_name='仿宋', font_size=Pt(16))
-
-
-def _match_official_heading(text: str):
-    """识别公文层级标题格式，返回 (level, heading_text) 或 None
-    
-    公文层级：
-    - 第一层："一、""二、""三、"等 → level 1
-    - 第二层："（一）""（二）""（三）"等 → level 2
-    - 第三层："1.""2.""3."等 → level 3
-    - 第四层："（1）""（2）""（3）"等 → level 4
-    """
-    # 第一层：一、二、三、...
-    if re.match(r"^[一二三四五六七八九十百千]+[、]\s*", text):
-        return (1, text)
-    
-    # 第二层：（一）（二）（三）...
-    if re.match(r"^[（(][一二三四五六七八九十百千]+[）)]\s*", text):
-        return (2, text)
-    
-    # 第三层：1. 2. 3. ...（已在主函数中通过有序列表处理，这里作为备用）
-    if re.match(r"^\d+[.、]\s+", text):
-        return (3, text)
-    
-    # 第四层：（1）（2）（3）...
-    if re.match(r"^[（(]\d+[）)]\s*", text):
-        return (4, text)
-    
-    return None
-
-
-def _set_run_format(run, font_name='仿宋', font_size=None, bold=False):
-    """设置文本运行的字体格式"""
-    from docx.oxml.ns import qn
-    from docx.shared import RGBColor
-    
-    run.font.name = font_name
-    run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
-    if font_size:
-        run.font.size = font_size
-    if bold:
-        run.font.bold = True
-    run.font.color.rgb = RGBColor(0, 0, 0)
-
-
-def _set_paragraph_format(paragraph, font_name='仿宋', font_size=None):
-    """设置段落格式：28磅固定行距"""
-    from docx.enum.text import WD_LINE_SPACING
-    from docx.shared import Pt
-    
-    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    paragraph.paragraph_format.line_spacing = Pt(28)
+        r = paragraph.add_run(text[last:])
+        apply_style(r)
 
 
 # ── 主题配置 ────────────────────────────────────────────────────────────────
@@ -267,7 +217,7 @@ ctk.set_default_color_theme("blue")
 
 # ── 常量定义 ────────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_writer_config.json")
-APP_VERSION = "v2.1.0"
+APP_VERSION = "v2.2.3"  # Updated version
 APP_AUTHOR  = "Yu JinQuan"
 
 # ── 服务商配置表 ────────────────────────────────────────────────────────────
@@ -275,19 +225,19 @@ PROVIDERS = {
     "Anthropic (Claude)": {
         "icon":     "🤖",
         "type":     "anthropic",
-        "base_url": "",
+        "base_url": "[https://api.anthropic.com](https://api.anthropic.com)",
         "key_hint": "sk-ant-api03-...",
         "models": [
-            "claude-opus-4-5-20251101",
-            "claude-sonnet-4-5-20250929",
-            "claude-haiku-4-5-20251001",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-haiku-20240307",
         ],
-        "default_model": "claude-sonnet-4-5-20250929",
+        "default_model": "claude-3-5-sonnet-20241022",
     },
     "DeepSeek": {
         "icon":     "🐋",
         "type":     "openai_compat",
-        "base_url": "https://api.deepseek.com",
+        "base_url": "[https://api.deepseek.com](https://api.deepseek.com)",
         "key_hint": "sk-...",
         "models": [
             "deepseek-chat",
@@ -298,14 +248,13 @@ PROVIDERS = {
     "OpenAI": {
         "icon":     "🌐",
         "type":     "openai_compat",
-        "base_url": "https://api.openai.com/v1",
+        "base_url": "[https://api.openai.com/v1](https://api.openai.com/v1)",
         "key_hint": "sk-...",
         "models": [
             "gpt-4o",
             "gpt-4o-mini",
-            "o1",
+            "o1-preview",
             "o1-mini",
-            "o3-mini",
         ],
         "default_model": "gpt-4o",
     },
@@ -332,36 +281,35 @@ DOCUMENT_TYPES = [
     ("✨", "自定义",    "根据您的描述自由定制文稿类型与结构"),
 ]
 
-OUTLINE_SYSTEM = """你是一位资深写作顾问，擅长为各类专业文稿设计清晰、合理的结构大纲。
+# ── 提示词系统 (Prompts) ────────────────────────────────────────────────────
+# 为了防止复制截断，已检查字符串完整性
+OUTLINE_SYSTEM = (
+    "你是一位资深写作顾问，擅长为各类专业文稿设计清晰、合理的结构大纲。\n\n"
+    "请根据用户提供的文稿类型、题目和要求，输出一份层次分明的大纲。\n\n"
+    "格式规范：\n"
+    "- 一级章节：1. 章节名称（简要说明本章核心内容）\n"
+    "- 二级章节：1.1 小节名称（说明）\n"
+    "- 三级要点：1.1.1 要点（如有必要）\n"
+    "- 每个条目要精炼，括号内说明控制在20字以内\n\n"
+    "注意：\n"
+    "- 直接输出大纲正文，无需前言或解释\n"
+    "- 学术论文须包含摘要、关键词、引言、正文各节、结论、参考文献\n"
+    "- 其他类型按其行文惯例组织结构\n"
+    "- 大纲条目数量适中，一般10~20条为宜"
+)
 
-请根据用户提供的文稿类型、题目和要求，输出一份层次分明的大纲。
-
-格式规范：
-- 一级章节：1. 章节名称（简要说明本章核心内容）
-- 二级章节：1.1 小节名称（说明）
-- 三级要点：1.1.1 要点（如有必要）
-- 每个条目要精炼，括号内说明控制在20字以内
-
-注意：
-- 直接输出大纲正文，无需前言或解释
-- 学术论文须包含摘要、关键词、引言、正文各节、结论、参考文献
-- 其他类型按其行文惯例组织结构
-- 大纲条目数量适中，一般10~20条为宜
-"""
-
-WRITING_SYSTEM = """你是一位经验丰富的专业写作专家，擅长撰写高质量、内容充实的各类文稿。
-
-请严格依据提供的文稿类型、题目、要求和大纲，撰写完整的正文内容。
-
-写作规范：
-- 语言专业、准确、流畅，符合相应文体规范
-- 内容充实，论据充分，逻辑严密
-- 严格按照大纲结构依次展开，不得遗漏章节
-- 每个章节内容饱满，避免空洞
-- 学术论文须有理论依据，工作类文稿须结合实际
-- 使用 Markdown 格式：# 一级标题，## 二级标题，**加粗**等
-- 直接输出正文，无需额外说明
-"""
+WRITING_SYSTEM = (
+    "你是一位经验丰富的专业写作专家，擅长撰写高质量、内容充实的各类文稿。\n\n"
+    "请严格依据提供的文稿类型、题目、要求和大纲，撰写完整的正文内容。\n\n"
+    "写作规范：\n"
+    "- 语言专业、准确、流畅，符合相应文体规范\n"
+    "- 内容充实，论据充分，逻辑严密\n"
+    "- 严格按照大纲结构依次展开，不得遗漏章节\n"
+    "- 每个章节内容饱满，避免空洞\n"
+    "- 学术论文须有理论依据，工作类文稿须结合实际\n"
+    "- 使用 Markdown 格式：# 一级标题，## 二级标题，**加粗**等\n"
+    "- 直接输出正文，无需额外说明"
+)
 
 
 # ── 配置管理器 ──────────────────────────────────────────────────────────────
@@ -445,7 +393,10 @@ class APIClient:
 
     def _stream_anthropic(self, system, prompt, max_tokens):
         import anthropic
-        client = anthropic.Anthropic(api_key=self.api_key)
+        client = anthropic.Anthropic(
+            api_key=self.api_key,
+            base_url=self.base_url if self.base_url else None
+        )
         with client.messages.stream(
             model=self.model,
             max_tokens=max_tokens,
@@ -595,7 +546,7 @@ class AIWriterApp(ctk.CTk):
         self._provider_var = ctk.StringVar(
             value=self._cfg.get("provider", "Anthropic (Claude)"))
 
-        # 用分段按钮展示服务商（更直观）
+        # 用分段按钮展示服务商
         provider_frame = ctk.CTkFrame(sb, fg_color="transparent")
         provider_frame.grid(row=13, column=0, padx=8, pady=(0, 10), sticky="ew")
         provider_frame.grid_columnconfigure((0, 1), weight=1)
@@ -660,12 +611,12 @@ class AIWriterApp(ctk.CTk):
         )
         self._model_menu.grid(row=18, column=0, padx=8, pady=(0, 10), sticky="ew")
 
-        # ── 自定义 Base URL（条件显示）────────────────────────────────────
-        self._url_label = ctk.CTkLabel(sb, text="  Base URL",
+        # ── Base URL ──────────────────────────────────────────────────────
+        self._url_label = ctk.CTkLabel(sb, text="  Base URL (选填/代理)",
                                         font=ctk.CTkFont(size=11, weight="bold"),
                                         text_color="#7FA8D4")
         self._url_entry = ctk.CTkEntry(
-            sb, placeholder_text="https://your-api.com/v1", height=34,
+            sb, placeholder_text="[https://api.example.com/v1](https://api.example.com/v1)", height=34,
             fg_color=("#0D1B36", "#0A1228"), border_color="#2A4070",
             text_color="white", placeholder_text_color="#4A6FA0",
         )
@@ -876,30 +827,31 @@ class AIWriterApp(ctk.CTk):
         self._key_entry.delete(0, "end")
         self._key_entry.insert(0, pcfg.get("api_key", ""))
 
+        # Base URL Handling
+        saved_url = pcfg.get("base_url", "")
+        default_url = pinfo.get("base_url", "")
+        
+        self._url_entry.delete(0, "end")
+        self._url_entry.insert(0, saved_url if saved_url else default_url)
+
         # 重置显示 Key 状态
         if self._show_key:
             self._toggle_key_visibility()
 
-        # 模型
+        # 模型 & Custom UI Logic
         is_custom = (pname == "自定义 (OpenAI 兼容)")
         if is_custom:
             self._model_menu.configure(values=["自定义"], state="disabled")
             self._model_var.set("自定义")
-            self._url_label.grid()
-            self._url_entry.grid()
             self._custom_model_label.grid()
             self._custom_model_entry.grid()
-            self._url_entry.delete(0, "end")
-            self._url_entry.insert(0, pcfg.get("base_url", ""))
             self._custom_model_entry.delete(0, "end")
             self._custom_model_entry.insert(0, pcfg.get("model", ""))
         else:
             models = pinfo["models"]
             self._model_menu.configure(values=models, state="normal")
-            saved = pcfg.get("model", pinfo["default_model"])
-            self._model_var.set(saved if saved in models else models[0])
-            self._url_label.grid_remove()
-            self._url_entry.grid_remove()
+            saved_model = pcfg.get("model", pinfo["default_model"])
+            self._model_var.set(saved_model if saved_model in models else models[0])
             self._custom_model_label.grid_remove()
             self._custom_model_entry.grid_remove()
 
@@ -918,9 +870,9 @@ class AIWriterApp(ctk.CTk):
         pname = self._provider_var.get()
         self._cfg.set("provider", pname)
         self._cfg.set_provider_cfg(pname, "api_key", self._key_entry.get().strip())
+        self._cfg.set_provider_cfg(pname, "base_url", self._url_entry.get().strip())
 
         if pname == "自定义 (OpenAI 兼容)":
-            self._cfg.set_provider_cfg(pname, "base_url", self._url_entry.get().strip())
             self._cfg.set_provider_cfg(pname, "model", self._custom_model_entry.get().strip())
         else:
             self._cfg.set_provider_cfg(pname, "model", self._model_var.get())
@@ -963,10 +915,12 @@ class AIWriterApp(ctk.CTk):
                                   f"请为「{pname}」填写 API Key 并保存！")
             return None
 
+        base_url_input = self._url_entry.get().strip()
+        base_url = base_url_input if base_url_input else pcfg.get("base_url", "")
+        
         is_custom = (pname == "自定义 (OpenAI 兼容)")
         if is_custom:
-            base_url = self._url_entry.get().strip() or pcfg.get("base_url", "")
-            model    = self._custom_model_entry.get().strip() or pcfg.get("model", "")
+            model = self._custom_model_entry.get().strip() or pcfg.get("model", "")
             if not base_url:
                 messagebox.showerror("缺少 Base URL", "自定义服务商需要填写 Base URL！")
                 return None
@@ -974,8 +928,7 @@ class AIWriterApp(ctk.CTk):
                 messagebox.showerror("缺少模型名", "请填写自定义模型名称！")
                 return None
         else:
-            base_url = PROVIDERS[pname]["base_url"]
-            model    = self._model_var.get()
+            model = self._model_var.get()
 
         return APIClient(
             provider_name=pname,
@@ -1001,8 +954,13 @@ class AIWriterApp(ctk.CTk):
         if not self._title_entry.get().strip():
             messagebox.showwarning("提示", "请先输入文稿题目或主题！")
             return
-        client = self._build_api_client()
-        if not client:
+        
+        try:
+            client = self._build_api_client()
+            if not client:
+                return
+        except Exception as e:
+            messagebox.showerror("配置错误", str(e))
             return
 
         self._set_busy(True)
@@ -1018,7 +976,7 @@ class AIWriterApp(ctk.CTk):
                 self.after(0, lambda: self._set_status(
                     "✅  大纲生成完成 · 可直接编辑后点击「开始撰写」"))
             except Exception as exc:
-                self.after(0, lambda e=exc: messagebox.showerror("生成失败", str(e)))
+                self.after(0, lambda e=exc: messagebox.showerror("生成失败", f"连接错误：\n{str(e)}\n\n请检查 API Key 或 Base URL (代理) 设置。"))
                 self.after(0, lambda: self._set_status("❌  大纲生成失败"))
             finally:
                 self.after(0, lambda: self._set_busy(False))
@@ -1036,8 +994,13 @@ class AIWriterApp(ctk.CTk):
         if not outline:
             messagebox.showwarning("提示", "请先生成或填写大纲内容！")
             return
-        client = self._build_api_client()
-        if not client:
+        
+        try:
+            client = self._build_api_client()
+            if not client:
+                return
+        except Exception as e:
+            messagebox.showerror("配置错误", str(e))
             return
 
         self._set_busy(True)
@@ -1057,7 +1020,7 @@ class AIWriterApp(ctk.CTk):
                 self.after(0, lambda: self._set_status(
                     f"✅  撰写完成 · [{client.provider_name} · {client.model}] · 共 {char_count} 字"))
             except Exception as exc:
-                self.after(0, lambda e=exc: messagebox.showerror("生成失败", str(e)))
+                self.after(0, lambda e=exc: messagebox.showerror("生成失败", f"连接错误：\n{str(e)}\n\n请检查 API Key 或 Base URL (代理) 设置。"))
                 self.after(0, lambda: self._set_status("❌  撰写失败"))
             finally:
                 self.after(0, lambda: self._set_busy(False))
@@ -1079,18 +1042,17 @@ class AIWriterApp(ctk.CTk):
         if not text:
             messagebox.showinfo("提示", "暂无可保存的内容。")
             return
-        # ── 先弹出格式选择对话框 ──────────────────────────────────────────
         fmt = self._ask_save_format()
         if fmt is None:
-            return   # 用户取消
+            return
 
         title = self._title_entry.get().strip() or "文稿"
         ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         fmt_cfg = {
-            "docx": (".docx", "Word 文档 (*.docx)",  "*.docx"),
-            "txt":  (".txt",  "纯文本 (*.txt)",       "*.txt"),
-            "md":   (".md",   "Markdown (*.md)",      "*.md"),
+            "docx": (".docx", "Word 文档 (公文版式) (*.docx)", "*.docx"),
+            "txt":  (".txt",  "纯文本 (*.txt)",             "*.txt"),
+            "md":   (".md",   "Markdown (*.md)",            "*.md"),
         }
         def_ext, ftype_name, ftype_glob = fmt_cfg[fmt]
 
@@ -1103,7 +1065,6 @@ class AIWriterApp(ctk.CTk):
         if not fp:
             return
 
-        # 确保文件扩展名正确（Linux 下 tkinter 有时不自动追加）
         if not fp.lower().endswith(def_ext):
             fp += def_ext
 
@@ -1123,51 +1084,44 @@ class AIWriterApp(ctk.CTk):
                 "保存 Word 文档需要安装 python-docx：\n\npip install python-docx"
             )
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("保存失败", str(exc))
 
     def _ask_save_format(self):
-        """弹出格式选择窗口，返回 'docx'/'txt'/'md' 或 None（取消）
-        使用原生 tk.Toplevel 规避 CTkToplevel 在 Linux 上的黑屏渲染 Bug。
-        """
+        """弹出格式选择窗口"""
         result = [None]
-
-        # ── 颜色常量（与主题一致）─────────────────────────────────────────
         BG       = "#1A2744"
         FG       = "#E8F0FE"
         BTN_BG   = "#163366"
         BTN_HV   = "#2B6CB0"
         CANCEL   = "#0F1A33"
         BORDER   = "#2A4070"
-        ACCENT   = "#2B6CB0"
 
-        # ── 居中坐标 ─────────────────────────────────────────────────────
         self.update_idletasks()
         W, H = 320, 230
         x = self.winfo_x() + (self.winfo_width()  - W) // 2
         y = self.winfo_y() + (self.winfo_height() - H) // 2
 
-        # ── 创建原生窗口 ──────────────────────────────────────────────────
         dlg = tk.Toplevel(self)
         dlg.title("选择保存格式")
         dlg.geometry(f"{W}x{H}+{x}+{y}")
         dlg.resizable(False, False)
         dlg.configure(bg=BG)
-        dlg.transient(self)     # 跟随主窗口
+        dlg.transient(self)
         dlg.lift()
-        dlg.update()            # 先渲染再 grab，避免黑屏
+        dlg.update()
         dlg.grab_set()
         dlg.focus_force()
 
-        # ── 标题标签 ─────────────────────────────────────────────────────
         tk.Label(
             dlg, text="请选择保存格式",
             bg=BG, fg=FG,
             font=("TkDefaultFont", 13, "bold"),
         ).pack(pady=(18, 10))
 
-        # ── 格式按钮 ─────────────────────────────────────────────────────
         formats = [
-            ("docx", "📝  Word 文档  (.docx)"),
+            ("docx", "📝  Word 文档 (公文版式)"),
             ("txt",  "📄  纯文本      (.txt)"),
             ("md",   "🔖  Markdown   (.md)"),
         ]
@@ -1182,10 +1136,8 @@ class AIWriterApp(ctk.CTk):
             )
             btn.pack(fill="x", padx=28, pady=3)
 
-        # ── 分隔线 ────────────────────────────────────────────────────────
         tk.Frame(dlg, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(8, 0))
 
-        # ── 取消按钮 ─────────────────────────────────────────────────────
         tk.Button(
             dlg, text="取消",
             bg=CANCEL, fg="#7FA8D4", activebackground="#1A2744",
