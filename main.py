@@ -10,35 +10,27 @@ import docx
 import edge_tts
 from openai import OpenAI
 import imageio_ffmpeg
+import re  # 新增正则表达式库，用于处理同音字替换
 
 # 默认配置
 DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com"
 
 # --- 完整的 Edge-TTS 免费中文语音库 ---
 VOICE_MAP = {
-    # 大陆普通话
     "晓晓 (女声 - 活泼/默认)": "zh-CN-XiaoxiaoNeural",
     "晓伊 (女声 - 可爱/儿童)": "zh-CN-XiaoyiNeural",
     "云希 (男声 - 沉稳/影视)": "zh-CN-YunxiNeural",
     "云健 (男声 - 体育/解说)": "zh-CN-YunjianNeural",
     "云扬 (男声 - 新闻/播音)": "zh-CN-YunyangNeural",
     "云夏 (男声 - 少年)": "zh-CN-YunxiaNeural",
-    
-    # 地方方言
     "辽宁小北 (东北话 - 女声)": "zh-CN-Liaoning-XiaobeiNeural",
     "陕西小妮 (陕西话 - 女声)": "zh-CN-Shaanxi-XiaoniNeural",
-    
-    # 中国香港 (粤语)
     "香港晓佳 (粤语 - 女声1)": "zh-HK-HiuGaaiNeural",
     "香港晓曼 (粤语 - 女声2)": "zh-HK-HiuMaanNeural",
     "香港云龙 (粤语 - 男声)": "zh-HK-WanLungNeural",
-    
-    # 中国台湾 (台湾腔)
     "台湾晓臻 (台湾腔 - 女声1)": "zh-TW-HsiaoChenNeural",
     "台湾晓雨 (台湾腔 - 女声2)": "zh-TW-HsiaoYuNeural",
     "台湾云哲 (台湾腔 - 男声)": "zh-TW-YunJheNeural",
-    
-    # 附赠两个常用英文
     "英语 (女声 - Aria)": "en-US-AriaNeural",
     "英语 (男声 - Guy)": "en-US-GuyNeural"
 }
@@ -58,7 +50,6 @@ class TTSApp:
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
-        # 默认选中第一个语音
         self.selected_voice_key = tk.StringVar(value="晓晓 (女声 - 活泼/默认)")
         
         threading.Thread(target=self.start_loop, daemon=True).start()
@@ -83,10 +74,10 @@ class TTSApp:
         tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
         
-        # 多音字修正按钮
-        tk.Frame(frame_top, width=20).pack(side=tk.LEFT) # 占位
-        tk.Label(frame_top, text="选中文字后点击 ->", fg="gray").pack(side=tk.LEFT)
-        tk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
+        # 恢复并优化的多音字修正按钮
+        tk.Frame(frame_top, width=20).pack(side=tk.LEFT) 
+        tk.Label(frame_top, text="选中多音字后点击 ->", fg="gray").pack(side=tk.LEFT)
+        tk.Button(frame_top, text="📝 修正选中字读音 (同音字法)", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
 
         # 2. 底部控制区 (倒序)
         frame_status = tk.Frame(self.root, bd=1, relief=tk.SUNKEN, bg="#f0f0f0")
@@ -126,7 +117,7 @@ class TTSApp:
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
 
-    # --- 核心功能：修正读音 ---
+    # --- 恢复同音字替换逻辑 ---
     def fix_pronunciation(self):
         try:
             selection = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
@@ -137,14 +128,15 @@ class TTSApp:
         if not selection.strip():
             return
 
-        hint = f"请输入 [{selection}] 的正确拼音 (格式: 拼音+空格+声调数字)\n例如: chong 2, hang 2, shan 4"
-        pinyin = simpledialog.askstring("修正读音", hint)
+        hint = f"请输入 [{selection}] 的【同音字】\n例如选了“单”，这里输入发音相同的“善”"
+        homophone = simpledialog.askstring("同音字替换", hint)
         
-        if pinyin:
-            ssml_tag = f'<phoneme alphabet="sapi" ph="{pinyin.strip()}">{selection}</phoneme>'
+        if homophone:
+            # 格式化为 [原字|同音字]，例如 [单|善]
+            replacement = f"[{selection}|{homophone.strip()}]"
             self.text_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
-            self.text_area.insert(tk.INSERT, ssml_tag)
-            self.update_status(f"已修正: {selection} -> {pinyin}")
+            self.text_area.insert(tk.INSERT, replacement)
+            self.update_status(f"已设置同音字: {selection} -> {homophone}")
 
     # --- 文件操作 ---
     def import_file(self):
@@ -205,23 +197,17 @@ class TTSApp:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
-    # --- 语音合成核心 (含 SSML 处理) ---
+    # --- 语音合成核心 ---
     async def _generate_audio_task(self, text, output_file):
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
-        if "<phoneme" in text:
-            ssml_text = f"""
-            <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
-                <voice name='{voice_id}'>
-                    {text}
-                </voice>
-            </speak>
-            """
-            communicate = edge_tts.Communicate(ssml_text, voice_id)
-        else:
-            communicate = edge_tts.Communicate(text, voice_id)
-            
+        # 核心逻辑：利用正则表达式，将 [原字|同音字] 提取出同音字发给引擎
+        # 比如：引擎收到的不再是 [单|善]老师，而是 善老师
+        processed_text = re.sub(r'\[.*?\|(.*?)\]', r'\1', text)
+        
+        # 使用最纯净的文本进行发音，完美兼容所有声音模型
+        communicate = edge_tts.Communicate(processed_text, voice_id)
         await communicate.save(output_file)
 
     def play_audio(self):
@@ -240,7 +226,7 @@ class TTSApp:
                 if not self.is_generating: return
                 self.root.after(0, self._play_sound)
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("合成错误", f"可能原因：SSML标签格式错误或网络中断。\n详情：{str(e)}"))
+                self.root.after(0, lambda: messagebox.showerror("合成错误", str(e)))
                 self.root.after(0, lambda: self.update_status("合成出错"))
 
         threading.Thread(target=run_gen).start()
