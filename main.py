@@ -109,14 +109,13 @@ class TTSApp:
         ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
         ttk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bootstyle="success-outline").pack(side=RIGHT, padx=5)
 
-        # 4. 中间文本区 (使用原生 scrolledtext 恢复右键菜单功能)
+        # 4. 中间文本区 
         frame_text = ttk.Frame(self.root, padding=2)
         frame_text.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
-        # 换回原生的 tkinter scrolledtext
         self.text_area = scrolledtext.ScrolledText(frame_text, font=("Microsoft YaHei", 12), wrap=tk.WORD, bd=1, relief=tk.SOLID)
         self.text_area.pack(expand=True, fill=BOTH)
 
-        # === 恢复右键菜单 ===
+        # === 右键菜单 ===
         self.context_menu = tk.Menu(self.root, tearoff=0, font=("Microsoft YaHei", 10))
         self.context_menu.add_command(label="剪切", command=self.cut_text)
         self.context_menu.add_command(label="复制", command=self.copy_text)
@@ -126,10 +125,11 @@ class TTSApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="📝 修正选中字读音", command=self.fix_pronunciation)
 
-        # 绑定右键点击事件
-        self.text_area.bind("<Button-3>", self.show_context_menu)
+        # === 核心修复点：将 Button-3 改为 ButtonRelease-3 ===
+        self.text_area.bind("<ButtonRelease-3>", self.show_context_menu)
+        # 兼容 macOS
         if sys.platform == "darwin":
-            self.text_area.bind("<Button-2>", self.show_context_menu)
+            self.text_area.bind("<ButtonRelease-2>", self.show_context_menu)
 
     # --- 右键菜单功能 ---
     def show_context_menu(self, event):
