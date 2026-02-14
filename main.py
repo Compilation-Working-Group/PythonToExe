@@ -4,8 +4,10 @@ import asyncio
 import threading
 import subprocess
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, simpledialog
-from tkinter import ttk
+from tkinter import filedialog, messagebox, simpledialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledText
 import docx
 import edge_tts
 from openai import OpenAI
@@ -43,14 +45,14 @@ class TTSApp:
         window_width = 950
         window_height = 700
         self.center_window(window_width, window_height)
-        self.root.minsize(800, 500)
+        self.root.minsize(850, 550)
         
         self.is_playing = False
         self.is_generating = False 
         self.temp_audio_file = "temp_preview.mp3"
         self.loop = asyncio.new_event_loop()
         
-        self.selected_voice_key = tk.StringVar(value="晓晓 (女声 - 活泼/默认)")
+        self.selected_voice_key = ttk.StringVar(value="晓晓 (女声 - 活泼/默认)")
         
         threading.Thread(target=self.start_loop, daemon=True).start()
         self.create_ui()
@@ -67,53 +69,53 @@ class TTSApp:
         self.loop.run_forever()
 
     def create_ui(self):
-        # 1. 顶部操作区
-        frame_top = tk.LabelFrame(self.root, text="文件与编辑", padx=10, pady=5)
-        frame_top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 5))
+        # 1. 顶部操作区 (使用现代化 LabelFrame 和带有强调色的按钮)
+        frame_top = ttk.Labelframe(self.root, text="文件与编辑", padding=15, bootstyle="info")
+        frame_top.pack(side=TOP, fill=X, padx=15, pady=(15, 5))
         
-        tk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bg="#ffebee").pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_top, text="📂 导入文本/Word", command=self.import_file, bootstyle="primary-outline").pack(side=LEFT, padx=5)
+        ttk.Button(frame_top, text="🗑️ 清空内容", command=self.clear_text, bootstyle="danger-outline").pack(side=LEFT, padx=5)
         
-        tk.Frame(frame_top, width=20).pack(side=tk.LEFT) 
-        tk.Label(frame_top, text="选中多音字后点击 ->", fg="gray").pack(side=tk.LEFT)
-        tk.Button(frame_top, text="📝 修正选中字读音 (同音字法)", command=self.fix_pronunciation, bg="#fff3e0").pack(side=tk.LEFT, padx=5)
+        ttk.Frame(frame_top, width=30).pack(side=LEFT) 
+        ttk.Label(frame_top, text="选中多音字后点击 ->", foreground="gray").pack(side=LEFT)
+        ttk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bootstyle="warning").pack(side=LEFT, padx=5)
 
         # 2. 底部控制区 (倒序)
-        frame_status = tk.Frame(self.root, bd=1, relief=tk.SUNKEN, bg="#f0f0f0")
-        frame_status.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_label = tk.Label(frame_status, text="状态: 就绪", anchor=tk.W, bg="#f0f0f0")
-        self.status_label.pack(side=tk.LEFT, padx=5)
-        tk.Label(frame_status, text="Author: Yu JinQuan", anchor=tk.E, bg="#f0f0f0", fg="#666").pack(side=tk.RIGHT, padx=10)
+        frame_status = ttk.Frame(self.root, padding=5)
+        frame_status.pack(side=BOTTOM, fill=X)
+        self.status_label = ttk.Label(frame_status, text="状态: 就绪", bootstyle="secondary")
+        self.status_label.pack(side=LEFT, padx=10)
+        ttk.Label(frame_status, text="Author: Yu JinQuan", bootstyle="secondary").pack(side=RIGHT, padx=10)
 
-        frame_bottom = tk.LabelFrame(self.root, text="语音控制与导出", padx=10, pady=5)
-        frame_bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 10))
+        frame_bottom = ttk.Labelframe(self.root, text="语音控制与导出", padding=15, bootstyle="primary")
+        frame_bottom.pack(side=BOTTOM, fill=X, padx=15, pady=(5, 10))
         
-        tk.Label(frame_bottom, text="选择语音:").pack(side=tk.LEFT, padx=(5, 0))
-        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25)
-        voice_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(frame_bottom, text="选择发音人:").pack(side=LEFT, padx=(5, 5))
+        voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25, bootstyle="primary")
+        voice_combo.pack(side=LEFT, padx=5)
 
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        ttk.Separator(frame_bottom, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=15)
 
-        tk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bg="#e8f5e9", width=12).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bg="#ffcdd2", width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_bottom, text="▶️ 生成并播放", command=self.play_audio, bootstyle="success").pack(side=LEFT, padx=5)
+        ttk.Button(frame_bottom, text="⏹️ 停止", command=self.stop_audio, bootstyle="danger").pack(side=LEFT, padx=5)
         
-        tk.Frame(frame_bottom, width=2, bg="#ccc").pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        ttk.Separator(frame_bottom, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=15)
         
-        tk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3")).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav")).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3"), bootstyle="info").pack(side=LEFT, padx=5)
+        ttk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav"), bootstyle="info").pack(side=LEFT, padx=5)
 
         # 3. AI 润色区
-        frame_ai = tk.LabelFrame(self.root, text="DeepSeek AI 润色", padx=10, pady=5)
-        frame_ai.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
-        tk.Label(frame_ai, text="提示: 将文本改写为更自然的口语风格").pack(side=tk.LEFT)
-        tk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bg="#e3f2fd", fg="#0d47a1").pack(side=tk.RIGHT, padx=5)
+        frame_ai = ttk.Labelframe(self.root, text="DeepSeek AI 智能处理", padding=15, bootstyle="success")
+        frame_ai.pack(side=BOTTOM, fill=X, padx=15, pady=5)
+        ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
+        ttk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bootstyle="success-outline").pack(side=RIGHT, padx=5)
 
-        # 4. 中间文本区
-        self.text_area = scrolledtext.ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD)
-        self.text_area.pack(side=tk.TOP, expand=True, fill=tk.BOTH, padx=10, pady=5)
+        # 4. 中间文本区 (使用现代化的 ScrolledText)
+        self.text_area = ScrolledText(self.root, font=("Microsoft YaHei", 12), wrap=tk.WORD, padding=10, bootstyle="round")
+        self.text_area.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
 
-        # === 新增：右键菜单初始化与事件绑定 ===
-        self.context_menu = tk.Menu(self.root, tearoff=0)
+        # === 右键菜单保持原生体验 ===
+        self.context_menu = tk.Menu(self.root, tearoff=0, font=("Microsoft YaHei", 10))
         self.context_menu.add_command(label="剪切", command=self.cut_text)
         self.context_menu.add_command(label="复制", command=self.copy_text)
         self.context_menu.add_command(label="粘贴", command=self.paste_text)
@@ -122,12 +124,11 @@ class TTSApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="📝 修正选中字读音", command=self.fix_pronunciation)
 
-        # 绑定右键点击事件 (跨平台支持)
-        self.text_area.bind("<Button-3>", self.show_context_menu) # Windows, Linux, 现代 macOS
+        self.text_area.bind("<Button-3>", self.show_context_menu)
         if sys.platform == "darwin":
-            self.text_area.bind("<Button-2>", self.show_context_menu) # 兼容老版本 macOS
+            self.text_area.bind("<Button-2>", self.show_context_menu)
 
-    # --- 新增：右键菜单功能实现 ---
+    # --- 右键菜单功能 ---
     def show_context_menu(self, event):
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
@@ -146,7 +147,7 @@ class TTSApp:
         self.text_area.see(tk.INSERT)
         return 'break'
 
-    # --- 原有功能 ---
+    # --- 逻辑功能区 (与之前完全一致) ---
     def update_status(self, text):
         self.status_label.config(text=f"状态: {text}")
         self.root.update_idletasks()
@@ -328,6 +329,7 @@ class TTSApp:
         threading.Thread(target=run_export).start()
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    # 使用 ttkbootstrap 初始化窗口，并应用 cosmo 主题
+    root = ttk.Window(themename="cosmo")
     app = TTSApp(root)
     root.mainloop()
