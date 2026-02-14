@@ -1,8 +1,8 @@
 tk
+ttkbootstrap
 edge-tts
 pygame
 python-docx
 openai
-# 仅保留 ffmpeg 包装器，用于获取 ffmpeg 路径
 imageio-ffmpeg
 pyinstaller
