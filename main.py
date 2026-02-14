@@ -41,10 +41,11 @@ class TTSApp:
         self.root = root
         self.root.title("DeepSeek 智能语音合成助手 - 作者: Yu JinQuan")
         
-        window_width = 950
-        window_height = 700
+        # 稍微加高了窗口，以容纳新的参数面板
+        window_width = 980
+        window_height = 760
         self.center_window(window_width, window_height)
-        self.root.minsize(850, 550)
+        self.root.minsize(900, 600)
         
         self.is_playing = False
         self.is_generating = False 
@@ -52,6 +53,11 @@ class TTSApp:
         self.loop = asyncio.new_event_loop()
         
         self.selected_voice_key = ttk.StringVar(value="晓晓 (女声 - 活泼/默认)")
+        
+        # 初始化参数变量
+        self.rate_var = tk.DoubleVar(value=0)
+        self.volume_var = tk.DoubleVar(value=0)
+        self.pitch_var = tk.DoubleVar(value=0)
         
         threading.Thread(target=self.start_loop, daemon=True).start()
         self.create_ui()
@@ -79,17 +85,20 @@ class TTSApp:
         ttk.Label(frame_top, text="选中多音字后点击 ->", foreground="gray").pack(side=LEFT)
         ttk.Button(frame_top, text="📝 修正选中字读音", command=self.fix_pronunciation, bootstyle="warning").pack(side=LEFT, padx=5)
 
-        # 2. 底部控制区 (倒序)
+        # === 以下按倒序(BOTTOM)加载 ===
+
+        # 2. 状态栏 (最底)
         frame_status = ttk.Frame(self.root, padding=5)
         frame_status.pack(side=BOTTOM, fill=X)
         self.status_label = ttk.Label(frame_status, text="状态: 就绪", bootstyle="secondary")
         self.status_label.pack(side=LEFT, padx=10)
         ttk.Label(frame_status, text="Author: Yu JinQuan", bootstyle="secondary").pack(side=RIGHT, padx=10)
 
+        # 3. 语音控制与导出 (倒数第二)
         frame_bottom = ttk.Labelframe(self.root, text="语音控制与导出", padding=15, bootstyle="primary")
         frame_bottom.pack(side=BOTTOM, fill=X, padx=15, pady=(5, 10))
         
-        ttk.Label(frame_bottom, text="选择发音人:").pack(side=LEFT, padx=(5, 5))
+        ttk.Label(frame_bottom, text="发音人:").pack(side=LEFT, padx=(5, 5))
         voice_combo = ttk.Combobox(frame_bottom, textvariable=self.selected_voice_key, values=list(VOICE_MAP.keys()), state="readonly", width=25, bootstyle="primary")
         voice_combo.pack(side=LEFT, padx=5)
 
@@ -103,13 +112,47 @@ class TTSApp:
         ttk.Button(frame_bottom, text="💾 导出 MP3", command=lambda: self.export_audio("mp3"), bootstyle="info").pack(side=LEFT, padx=5)
         ttk.Button(frame_bottom, text="🎵 导出 WAV", command=lambda: self.export_audio("wav"), bootstyle="info").pack(side=LEFT, padx=5)
 
-        # 3. AI 润色区
+        # 4. 新增：高级参数调节区 (倒数第三)
+        frame_params = ttk.Labelframe(self.root, text="高级语音参数", padding=10, bootstyle="warning")
+        frame_params.pack(side=BOTTOM, fill=X, padx=15, pady=5)
+        
+        # 使用 Grid 布局使滑块对齐更美观
+        # --- 语速 ---
+        ttk.Label(frame_params, text="语速调节:").grid(row=0, column=0, padx=(10, 5), pady=5, sticky="e")
+        scale_rate = ttk.Scale(frame_params, from_=-50, to=50, variable=self.rate_var, command=self.update_param_labels, bootstyle="primary")
+        scale_rate.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.lbl_rate = ttk.Label(frame_params, text="0%", width=5, font=("Arial", 10, "bold"))
+        self.lbl_rate.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        
+        # --- 音量 ---
+        ttk.Label(frame_params, text="音量调节:").grid(row=0, column=3, padx=(20, 5), pady=5, sticky="e")
+        scale_vol = ttk.Scale(frame_params, from_=-50, to=50, variable=self.volume_var, command=self.update_param_labels, bootstyle="success")
+        scale_vol.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
+        self.lbl_vol = ttk.Label(frame_params, text="0%", width=5, font=("Arial", 10, "bold"))
+        self.lbl_vol.grid(row=0, column=5, padx=5, pady=5, sticky="w")
+        
+        # --- 音调 ---
+        ttk.Label(frame_params, text="音调调节:").grid(row=0, column=6, padx=(20, 5), pady=5, sticky="e")
+        scale_pitch = ttk.Scale(frame_params, from_=-50, to=50, variable=self.pitch_var, command=self.update_param_labels, bootstyle="warning")
+        scale_pitch.grid(row=0, column=7, padx=5, pady=5, sticky="ew")
+        self.lbl_pitch = ttk.Label(frame_params, text="0Hz", width=6, font=("Arial", 10, "bold"))
+        self.lbl_pitch.grid(row=0, column=8, padx=5, pady=5, sticky="w")
+        
+        # --- 重置按钮 ---
+        ttk.Button(frame_params, text="🔄 重置参数", command=self.reset_params, bootstyle="secondary-outline").grid(row=0, column=9, padx=(20, 10), pady=5)
+
+        # 配置列权重，让滑块占据剩余空间
+        frame_params.columnconfigure(1, weight=1)
+        frame_params.columnconfigure(4, weight=1)
+        frame_params.columnconfigure(7, weight=1)
+
+        # 5. AI 润色区 (倒数第四)
         frame_ai = ttk.Labelframe(self.root, text="DeepSeek AI 智能处理", padding=15, bootstyle="success")
         frame_ai.pack(side=BOTTOM, fill=X, padx=15, pady=5)
         ttk.Label(frame_ai, text="提示: 借助大模型将生硬的文本改写为更自然、流畅的口语化播音文案。").pack(side=LEFT, padx=5)
         ttk.Button(frame_ai, text="✨ 开始智能润色", command=self.run_deepseek_polish, bootstyle="success-outline").pack(side=RIGHT, padx=5)
 
-        # 4. 中间文本区 
+        # 6. 中间文本区 (置顶，填充剩余空间)
         frame_text = ttk.Frame(self.root, padding=2)
         frame_text.pack(side=TOP, expand=True, fill=BOTH, padx=15, pady=10)
         self.text_area = scrolledtext.ScrolledText(frame_text, font=("Microsoft YaHei", 12), wrap=tk.WORD, bd=1, relief=tk.SOLID)
@@ -125,11 +168,27 @@ class TTSApp:
         self.context_menu.add_separator()
         self.context_menu.add_command(label="📝 修正选中字读音", command=self.fix_pronunciation)
 
-        # === 核心修复点：将 Button-3 改为 ButtonRelease-3 ===
         self.text_area.bind("<ButtonRelease-3>", self.show_context_menu)
-        # 兼容 macOS
         if sys.platform == "darwin":
             self.text_area.bind("<ButtonRelease-2>", self.show_context_menu)
+
+    # --- 新增：参数调节联动功能 ---
+    def update_param_labels(self, *args):
+        # 获取滑块的整数值
+        r = int(self.rate_var.get())
+        v = int(self.volume_var.get())
+        p = int(self.pitch_var.get())
+        
+        # 格式化显示文本 (带有正负号)
+        self.lbl_rate.config(text=f"{r:+d}%" if r else "0%")
+        self.lbl_vol.config(text=f"{v:+d}%" if v else "0%")
+        self.lbl_pitch.config(text=f"{p:+d}Hz" if p else "0Hz")
+
+    def reset_params(self):
+        self.rate_var.set(0)
+        self.volume_var.set(0)
+        self.pitch_var.set(0)
+        self.update_param_labels()
 
     # --- 右键菜单功能 ---
     def show_context_menu(self, event):
@@ -231,13 +290,30 @@ class TTSApp:
             self.root.after(0, lambda: messagebox.showerror("API 错误", f"请求失败: {str(e)}"))
             self.root.after(0, lambda: self.update_status("润色失败"))
 
+    # --- 升级版语音合成核心 (融入三大参数) ---
     async def _generate_audio_task(self, text, output_file):
         selected_name = self.selected_voice_key.get()
         voice_id = VOICE_MAP.get(selected_name, "zh-CN-XiaoxiaoNeural")
         
         processed_text = re.sub(r'\[.*?\|(.*?)\]', r'\1', text)
         
-        communicate = edge_tts.Communicate(processed_text, voice_id)
+        # 提取参数值并格式化为 Edge-TTS 接受的字符串标准
+        r = int(self.rate_var.get())
+        v = int(self.volume_var.get())
+        p = int(self.pitch_var.get())
+        
+        rate_str = f"{r:+d}%"
+        vol_str = f"{v:+d}%"
+        pitch_str = f"{p:+d}Hz"
+        
+        # 将参数一并发送给引擎
+        communicate = edge_tts.Communicate(
+            text=processed_text, 
+            voice=voice_id,
+            rate=rate_str,
+            volume=vol_str,
+            pitch=pitch_str
+        )
         await communicate.save(output_file)
 
     def play_audio(self):
