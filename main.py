@@ -8,7 +8,7 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 import azure.cognitiveservices.speech as speechsdk
 
-# 尝试在 Windows 系统中开启高 DPI 感知，防止界面模糊
+# 尝试在 Windows 系统中开启高 DPI 感知，防止界面模糊与强行放大
 if os.name == 'nt':
     try:
         import ctypes
@@ -448,129 +448,127 @@ def on_clear():
     status_label.config(text="已清空", bootstyle=SECONDARY)
 
 
-# ================= 界面设计部分 (分栏布局修复与数值显示) =================
-# 放大初始窗口，适合宽屏展现
-root = tb.Window(title="微课语音生成专业版 (多平台/版权所有)", themename="litera", size=(1000, 680))
-root.minsize(850, 600)
+# ================= 界面设计部分 =================
+# 稍微放大初始窗口
+root = tb.Window(title="微课语音生成专业版 (多平台/版权所有)", themename="litera", size=(1050, 680))
+root.minsize(900, 620)
 
 saved_config = load_config()
 
-# ---- 顶层主容器 ----
-main_frame = tb.Frame(root)
-main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+# ---- 使用 PanedWindow 容器实现可拖拉的分栏 ----
+main_paned = tb.PanedWindow(root, orient=tk.HORIZONTAL, bootstyle=INFO)
+main_paned.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
 
-# ================= 右侧：控制区 (关键修复：先加载右侧，确保不被挤压) =================
-right_panel = tb.Frame(main_frame)
-right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(15, 0))
+left_panel = tb.Frame(main_paned)
+right_panel = tb.Frame(main_paned)
+
+# 【核心修复】：将左右初始比例调为 2:1，给右侧控制面板更多空间
+main_paned.add(left_panel, weight=2)
+main_paned.add(right_panel, weight=1)
+
+# ================= 右侧：控制区 =================
+right_inner = tb.Frame(right_panel, padding=(10, 0, 0, 0))
+right_inner.pack(fill=tk.BOTH, expand=True)
 
 # 1. API 配置面板
-api_frame = tb.Labelframe(right_panel, text=" ⚙️ Azure 接口配置 ", padding=12, bootstyle=INFO)
-api_frame.pack(fill=tk.X, pady=(0, 15))
+api_frame = tb.Labelframe(right_inner, text=" ⚙️ Azure 接口 ", padding=8, bootstyle=INFO)
+api_frame.pack(fill=tk.X, pady=(0, 10))
 
-tb.Label(api_frame, text="API 密钥:", font=("微软雅黑", 9)).pack(anchor="w", pady=(0, 2))
+tb.Label(api_frame, text="API 密钥:", font=("微软雅黑", 9)).pack(anchor="w")
 entry_key = tb.Entry(api_frame, show="*")
-entry_key.pack(fill=tk.X, pady=(0, 10))
+entry_key.pack(fill=tk.X, pady=(0, 5))
 entry_key.insert(0, saved_config.get("speech_key", ""))
 
-tb.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 9)).pack(anchor="w", pady=(0, 2))
+tb.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 9)).pack(anchor="w")
 entry_region = tb.Entry(api_frame)
 entry_region.pack(fill=tk.X)
 entry_region.insert(0, saved_config.get("service_region", ""))
 
-# 2. 语音及参数面板 (新增百分比显示)
-voice_frame = tb.Labelframe(right_panel, text=" 🗣️ 语音与参数 ", padding=12, bootstyle=PRIMARY)
-voice_frame.pack(fill=tk.X, pady=(0, 15))
+# 2. 语音及参数面板
+voice_frame = tb.Labelframe(right_inner, text=" 🗣️ 语音与参数 ", padding=8, bootstyle=PRIMARY)
+voice_frame.pack(fill=tk.X, pady=(0, 10))
 
-tb.Label(voice_frame, text="发音人:", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(0, 5))
-voice_combo = tb.Combobox(voice_frame, values=list(VOICES.keys()), state="readonly", bootstyle=PRIMARY)
-voice_combo.pack(fill=tk.X, pady=(0, 10))
+tb.Label(voice_frame, text="发音人:", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(0, 2))
+# 【核心修复】：为发音人下拉框加入硬性 width 约束，避免被左侧文本框挤扁
+voice_combo = tb.Combobox(voice_frame, values=list(VOICES.keys()), state="readonly", bootstyle=PRIMARY, width=32)
+voice_combo.pack(fill=tk.X, pady=(0, 8))
 voice_combo.current(0)
 
-# --- 语速带数值 ---
+# 语速
 rate_header = tb.Frame(voice_frame)
 rate_header.pack(fill=tk.X)
 tb.Label(rate_header, text="语速:").pack(side=tk.LEFT)
 rate_val = tb.Label(rate_header, text="0%", font=("微软雅黑", 9, "bold"), bootstyle=INFO)
 rate_val.pack(side=tk.RIGHT)
-
-rate_scale = tb.Scale(voice_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=INFO, 
-                      command=lambda v: rate_val.config(text=f"{int(float(v))}%"))
+rate_scale = tb.Scale(voice_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=INFO, command=lambda v: rate_val.config(text=f"{int(float(v))}%"))
 rate_scale.set(0)
-rate_scale.pack(fill=tk.X, pady=(0, 8))
+rate_scale.pack(fill=tk.X, pady=(0, 5))
 
-# --- 音调带数值 ---
+# 音调
 pitch_header = tb.Frame(voice_frame)
 pitch_header.pack(fill=tk.X)
 tb.Label(pitch_header, text="音调:").pack(side=tk.LEFT)
 pitch_val = tb.Label(pitch_header, text="0%", font=("微软雅黑", 9, "bold"), bootstyle=WARNING)
 pitch_val.pack(side=tk.RIGHT)
-
-pitch_scale = tb.Scale(voice_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=WARNING, 
-                       command=lambda v: pitch_val.config(text=f"{int(float(v))}%"))
+pitch_scale = tb.Scale(voice_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=WARNING, command=lambda v: pitch_val.config(text=f"{int(float(v))}%"))
 pitch_scale.set(0)
-pitch_scale.pack(fill=tk.X, pady=(0, 8))
+pitch_scale.pack(fill=tk.X, pady=(0, 5))
 
-# --- 音量带数值 ---
+# 音量
 vol_header = tb.Frame(voice_frame)
 vol_header.pack(fill=tk.X)
 tb.Label(vol_header, text="音量:").pack(side=tk.LEFT)
 vol_val = tb.Label(vol_header, text="100%", font=("微软雅黑", 9, "bold"), bootstyle=SUCCESS)
 vol_val.pack(side=tk.RIGHT)
-
-volume_scale = tb.Scale(voice_frame, from_=0, to=100, orient=tk.HORIZONTAL, bootstyle=SUCCESS, 
-                        command=lambda v: vol_val.config(text=f"{int(float(v))}%"))
+volume_scale = tb.Scale(voice_frame, from_=0, to=100, orient=tk.HORIZONTAL, bootstyle=SUCCESS, command=lambda v: vol_val.config(text=f"{int(float(v))}%"))
 volume_scale.set(100)
-volume_scale.pack(fill=tk.X, pady=(0, 10))
+volume_scale.pack(fill=tk.X, pady=(0, 8))
 
 btn_reset = tb.Button(voice_frame, text="↺ 恢复默认参数", command=reset_params, bootstyle=(SECONDARY, OUTLINE))
 btn_reset.pack(fill=tk.X)
 
-# 3. 试听控制面板
-preview_frame = tb.Labelframe(right_panel, text=" 🎧 试听控制 ", padding=12, bootstyle=WARNING)
-preview_frame.pack(fill=tk.X, pady=(0, 15))
+# 3. 试听与生成合并面板
+action_frame = tb.Labelframe(right_inner, text=" 🎧 试听与生成 ", padding=8, bootstyle=SUCCESS)
+action_frame.pack(fill=tk.X)
+action_frame.columnconfigure((0, 1, 2), weight=1)
 
-btn_play = tb.Button(preview_frame, text="🔊 试听", command=on_preview, bootstyle=WARNING)
-btn_play.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
+btn_play = tb.Button(action_frame, text="🔊 试听", command=on_preview, bootstyle=WARNING)
+btn_play.grid(row=0, column=0, padx=2, pady=3, sticky="ew")
 
-btn_pause = tb.Button(preview_frame, text="⏸ 暂停", command=on_toggle_pause, bootstyle=(SECONDARY, OUTLINE))
-btn_pause.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
+btn_pause = tb.Button(action_frame, text="⏸ 暂停", command=on_toggle_pause, bootstyle=(SECONDARY, OUTLINE))
+btn_pause.grid(row=0, column=1, padx=2, pady=3, sticky="ew")
 
-btn_stop = tb.Button(preview_frame, text="⏹ 停止", command=stop_playback, bootstyle=(DANGER, OUTLINE))
-btn_stop.pack(side=tk.LEFT, expand=True, fill=tk.X)
+btn_stop = tb.Button(action_frame, text="⏹ 停止", command=stop_playback, bootstyle=(DANGER, OUTLINE))
+btn_stop.grid(row=0, column=2, padx=2, pady=3, sticky="ew")
 
-# 4. 导出操作面板
-export_frame = tb.Labelframe(right_panel, text=" 💾 生成音频 ", padding=12, bootstyle=SUCCESS)
-export_frame.pack(fill=tk.X)
+convert_btn_mp3 = tb.Button(action_frame, text="🎵 MP3 (推荐)", command=lambda: on_convert("mp3"), bootstyle=SUCCESS)
+convert_btn_mp3.grid(row=1, column=0, columnspan=2, padx=2, pady=(5, 0), sticky="ew")
 
-convert_btn_mp3 = tb.Button(export_frame, text="🎵 导出 MP3 (推荐)", command=lambda: on_convert("mp3"), bootstyle=SUCCESS)
-convert_btn_mp3.pack(fill=tk.X, pady=(0, 8))
-
-convert_btn_wav = tb.Button(export_frame, text="🎚️ 导出 WAV (无损)", command=lambda: on_convert("wav"), bootstyle=PRIMARY)
-convert_btn_wav.pack(fill=tk.X)
+convert_btn_wav = tb.Button(action_frame, text="🎚️ WAV (无损)", command=lambda: on_convert("wav"), bootstyle=PRIMARY)
+convert_btn_wav.grid(row=1, column=2, padx=2, pady=(5, 0), sticky="ew")
 
 
-# ================= 左侧：工作区 (后加载，填充全部剩余空间) =================
-left_panel = tb.Frame(main_frame)
-left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+# ================= 左侧：工作区 =================
+left_inner = tb.Frame(left_panel, padding=(0, 0, 10, 0))
+left_inner.pack(fill=tk.BOTH, expand=True)
 
-# 工具栏
-toolbar_frame = tb.Frame(left_panel)
+toolbar_frame = tb.Frame(left_inner)
 toolbar_frame.pack(fill=tk.X, pady=(0, 8))
 
 btn_import = tb.Button(toolbar_frame, text="📂 导入(TXT/Word)", command=on_import_file, bootstyle=(INFO, OUTLINE))
-btn_import.pack(side=tk.LEFT, padx=(0, 10))
+btn_import.pack(side=tk.LEFT, padx=(0, 5))
 
 btn_export = tb.Button(toolbar_frame, text="💾 保存为 TXT", command=on_export_txt, bootstyle=(WARNING, OUTLINE))
-btn_export.pack(side=tk.LEFT, padx=(0, 10))
+btn_export.pack(side=tk.LEFT, padx=5)
 
 btn_clear = tb.Button(toolbar_frame, text="🗑 清空", command=on_clear, bootstyle=(SECONDARY, OUTLINE))
-btn_clear.pack(side=tk.LEFT)
+btn_clear.pack(side=tk.LEFT, padx=5)
 
 btn_pinyin = tb.Button(toolbar_frame, text="✍ 修正选中字读音", command=on_correct_pinyin, bootstyle=(PRIMARY, OUTLINE))
-btn_pinyin.pack(side=tk.RIGHT)
+btn_pinyin.pack(side=tk.LEFT, padx=(15, 0)) 
 
-# 文本输入框
-text_input = tk.Text(left_panel, font=("微软雅黑", 12), wrap=tk.WORD, undo=True, maxundo=-1, relief=tk.FLAT, bg="#F8F9FA", padx=10, pady=10)
+# 【核心修复】：为 Text 控件加入 width=10，剥夺它硬性抢占宽度的特权，配合 expand=True 它依然能自适应拉伸！
+text_input = tk.Text(left_inner, width=10, font=("微软雅黑", 12), wrap=tk.WORD, undo=True, maxundo=-1, relief=tk.FLAT, bg="#F8F9FA", padx=10, pady=10)
 text_input.pack(fill=tk.BOTH, expand=True)
 
 text_input.bind("<FocusIn>", remove_placeholder)
