@@ -2,10 +2,10 @@ name: Build TTS Application
 
 on:
   push:
-    branches: [ "main" ] # 如果你的主分支叫 master，请修改为 master
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # 允许你在 GitHub Actions 页面手动点击运行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,7 +13,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # 定义需要编译的操作系统环境
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
@@ -23,7 +22,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10' # 3.10 版本在各平台打包最稳定
+        python-version: '3.10'
 
     - name: Install System Dependencies (Linux only)
       if: runner.os == 'Linux'
@@ -38,8 +37,7 @@ jobs:
 
     - name: Build Executable with PyInstaller
       run: |
-        # 强制收集底层依赖，避免运行报缺失库的错误
-        pyinstaller --noconfirm --onefile --windowed --name "ChemTTS_Pro" --collect-all azure.cognitiveservices.speech --collect-all docx main.py
+        pyinstaller --noconfirm --onefile --windowed --name "ChemTTS_Pro" --collect-all azure.cognitiveservices.speech --collect-all docx --collect-all ttkbootstrap main.py
 
     - name: Upload Artifact (Windows)
       if: runner.os == 'Windows'
