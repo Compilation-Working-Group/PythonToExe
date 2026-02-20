@@ -1,12 +1,20 @@
-import azure.cognitiveservices.speech as speechsdk
+import os
+import json
+import re
+import xml.sax.saxutils as saxutils
 import tkinter as tk
 from tkinter import messagebox, filedialog, simpledialog
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-import xml.sax.saxutils as saxutils
-import re
-import os
-import json
+import azure.cognitiveservices.speech as speechsdk
+
+# 尝试在 Windows 系统中开启高 DPI 感知，防止界面模糊和缩放错乱
+if os.name == 'nt':
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
 
 # 尝试导入音频播放模块
 try:
@@ -437,52 +445,57 @@ def on_clear():
     status_label.config(text="已清空", bootstyle=SECONDARY)
 
 # ================= 界面设计部分 =================
-# 使用 ttkbootstrap 初始化现代化窗口
-root = tb.Window(title="微课语音生成专业版 (多平台/版权所有)", themename="litera", size=(820, 720))
-root.minsize(750, 680)
+# 稍微放大初始窗口尺寸，避免高 DPI 屏幕下内容拥挤
+root = tb.Window(title="微课语音生成专业版 (多平台/版权所有)", themename="litera", size=(900, 750))
+root.minsize(820, 700)
 
 saved_config = load_config()
 
-# 顶部 API 配置区 (已修复 Labelframe 大小写问题)
+# 顶部 API 配置区 (启用列拉伸自适应)
 api_frame = tb.Labelframe(root, text=" ⚙️ Azure 接口配置 (自动保存) ", padding=10, bootstyle=INFO)
 api_frame.pack(fill=tk.X, padx=20, pady=10)
+api_frame.columnconfigure(1, weight=1) # 让 API 密钥输入框占据多余空间
 
 tb.Label(api_frame, text="API 密钥:", font=("微软雅黑", 10)).grid(row=0, column=0, padx=5, pady=5, sticky="e")
-entry_key = tb.Entry(api_frame, width=40, show="*")
-entry_key.grid(row=0, column=1, padx=5, pady=5)
+entry_key = tb.Entry(api_frame, show="*")
+entry_key.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 entry_key.insert(0, saved_config.get("speech_key", ""))
 
-tb.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 10)).grid(row=0, column=2, padx=(20, 5), pady=5, sticky="e")
-entry_region = tb.Entry(api_frame, width=18)
+tb.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 10)).grid(row=0, column=2, padx=(15, 5), pady=5, sticky="e")
+entry_region = tb.Entry(api_frame, width=15)
 entry_region.grid(row=0, column=3, padx=5, pady=5)
 entry_region.insert(0, saved_config.get("service_region", ""))
 
-# 参数设置区
+# 参数设置区 (改为两行布局，避免水平拥挤)
 top_frame = tb.Frame(root)
-top_frame.pack(fill=tk.X, padx=20, pady=10)
+top_frame.pack(fill=tk.X, padx=20, pady=5)
+top_frame.columnconfigure(1, weight=1) # 允许发音人下拉框拉伸
 
+# 第一行：发音人选择
 tb.Label(top_frame, text="发音人:", font=("微软雅黑", 10, "bold")).grid(row=0, column=0, pady=5, sticky="e")
-voice_combo = tb.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", width=35, bootstyle=PRIMARY)
-voice_combo.grid(row=0, column=1, padx=10, pady=5)
+voice_combo = tb.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", bootstyle=PRIMARY)
+voice_combo.grid(row=0, column=1, columnspan=6, padx=10, pady=5, sticky="ew")
 voice_combo.current(0)
 
+# 第二行：参数滑块与重置按钮
+tb.Label(top_frame, text="语速:").grid(row=1, column=0, sticky="e", pady=10)
 rate_scale = tb.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=INFO, length=120)
 rate_scale.set(0)
-tb.Label(top_frame, text="语速").grid(row=1, column=2)
-rate_scale.grid(row=0, column=2, padx=10)
+rate_scale.grid(row=1, column=1, padx=10, sticky="w")
 
+tb.Label(top_frame, text="音调:").grid(row=1, column=2, sticky="e")
 pitch_scale = tb.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=WARNING, length=120)
 pitch_scale.set(0)
-tb.Label(top_frame, text="音调").grid(row=1, column=3)
-pitch_scale.grid(row=0, column=3, padx=10)
+pitch_scale.grid(row=1, column=3, padx=10, sticky="w")
 
+tb.Label(top_frame, text="音量:").grid(row=1, column=4, sticky="e")
 volume_scale = tb.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, bootstyle=SUCCESS, length=120)
 volume_scale.set(100)
-tb.Label(top_frame, text="音量").grid(row=1, column=4)
-volume_scale.grid(row=0, column=4, padx=10)
+volume_scale.grid(row=1, column=5, padx=10, sticky="w")
 
 btn_reset = tb.Button(top_frame, text="↺ 重置", command=reset_params, bootstyle=(SECONDARY, OUTLINE))
-btn_reset.grid(row=0, column=5, padx=10, sticky="s", pady=(0, 5))
+btn_reset.grid(row=1, column=6, padx=10, sticky="w")
+
 
 # 文本编辑区
 text_frame = tb.Frame(root)
@@ -558,7 +571,7 @@ status_label = tb.Label(bottom_frame, text="准备就绪", font=("微软雅黑",
 status_label.pack(pady=(5, 10))
 
 # 作者与版权信息
-author_label = tb.Label(bottom_frame, text="© 俞晋全 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), bootstyle=SECONDARY, cursor="hand2")
+author_label = tb.Label(bottom_frame, text="© 俞金泉 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), bootstyle=SECONDARY, cursor="hand2")
 author_label.pack(side=tk.BOTTOM, pady=(0, 5))
 author_label.bind("<Button-1>", lambda e: show_about())
 
