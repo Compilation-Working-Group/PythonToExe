@@ -1,6 +1,8 @@
 import azure.cognitiveservices.speech as speechsdk
 import tkinter as tk
-from tkinter import messagebox, filedialog, ttk, simpledialog
+from tkinter import messagebox, filedialog, simpledialog
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
 import xml.sax.saxutils as saxutils
 import re
 import os
@@ -110,7 +112,7 @@ def save_config(key, region):
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f)
-    except Exception as e:
+    except Exception:
         pass
 
 def process_custom_pinyin(raw_text):
@@ -246,9 +248,8 @@ def reset_params():
     rate_scale.set(0)
     pitch_scale.set(0)
     volume_scale.set(100)
-    status_label.config(text="⚙️ 参数已重置为默认", fg="green")
+    status_label.config(text="⚙️ 参数已重置为默认", bootstyle=SUCCESS)
 
-# 【新增】关于软件与作者的弹窗信息
 def show_about():
     about_text = (
         "微课语音生成专业版 (ChemTTS Pro)\n"
@@ -269,7 +270,7 @@ def check_playback_status():
         
     if not pygame.mixer.music.get_busy() and not is_paused:
         is_playing = False
-        status_label.config(text="试听已结束", fg="green")
+        status_label.config(text="试听已结束", bootstyle=SUCCESS)
         btn_pause.config(text="⏸ 暂停")
     else:
         root.after(500, check_playback_status)
@@ -283,7 +284,7 @@ def stop_playback():
     is_paused = False
     is_playing = False
     btn_pause.config(text="⏸ 暂停")
-    status_label.config(text="已停止播放", fg="gray")
+    status_label.config(text="已停止播放", bootstyle=SECONDARY)
 
 def on_preview():
     if check_empty_input(): return
@@ -294,21 +295,21 @@ def on_preview():
 
     text = text_input.get("1.0", tk.END).strip()
     stop_playback()
-    status_label.config(text="正在呼叫 Azure 生成试听音频...", fg="blue")
+    status_label.config(text="正在呼叫 Azure 生成试听音频...", bootstyle=INFO)
     root.update()
 
     selected_voice = VOICES[voice_combo.get()]
     success, msg = text_to_speech_file(text, temp_preview_file, selected_voice, rate_scale.get(), pitch_scale.get(), volume_scale.get())
     
     if success:
-        status_label.config(text="正在播放试听...", fg="green")
+        status_label.config(text="正在播放试听...", bootstyle=SUCCESS)
         pygame.mixer.music.load(temp_preview_file)
         pygame.mixer.music.play()
         is_playing = True
         is_paused = False
         check_playback_status()
     else:
-        status_label.config(text="试听生成失败", fg="red")
+        status_label.config(text="试听生成失败", bootstyle=DANGER)
         messagebox.showerror("生成失败", msg)
 
 def on_toggle_pause():
@@ -319,12 +320,12 @@ def on_toggle_pause():
         pygame.mixer.music.unpause()
         btn_pause.config(text="⏸ 暂停")
         is_paused = False
-        status_label.config(text="正在播放试听...", fg="green")
+        status_label.config(text="正在播放试听...", bootstyle=SUCCESS)
     else:
         pygame.mixer.music.pause()
         btn_pause.config(text="▶ 继续")
         is_paused = True
-        status_label.config(text="试听已暂停", fg="#FF9800")
+        status_label.config(text="试听已暂停", bootstyle=WARNING)
 
 def on_convert(audio_format="mp3"):
     if check_empty_input(): return
@@ -344,17 +345,17 @@ def on_convert(audio_format="mp3"):
         
     if not save_path: return
         
-    status_label.config(text=f"正在导出 {audio_format.upper()} 文件，请稍候...", fg="blue")
+    status_label.config(text=f"正在导出 {audio_format.upper()} 文件，请稍候...", bootstyle=INFO)
     root.update()
     
     selected_voice = VOICES[voice_combo.get()]
     success, msg = text_to_speech_file(text, save_path, selected_voice, rate_scale.get(), pitch_scale.get(), volume_scale.get())
     
     if success:
-        status_label.config(text=f"导出成功！保存在: {save_path}", fg="green")
+        status_label.config(text=f"导出成功！保存在: {save_path}", bootstyle=SUCCESS)
         messagebox.showinfo("成功", f"语音合成成功！文件位于:\n{save_path}")
     else:
-        status_label.config(text="合成失败", fg="red")
+        status_label.config(text="合成失败", bootstyle=DANGER)
         messagebox.showerror("生成失败", msg)
 
 def on_import_file():
@@ -387,7 +388,7 @@ def on_import_file():
         
         remove_placeholder()
         text_input.insert(tk.END, content + "\n")
-        status_label.config(text=f"成功导入: {os.path.basename(file_path)}", fg="green")
+        status_label.config(text=f"成功导入: {os.path.basename(file_path)}", bootstyle=SUCCESS)
     except Exception as e:
         messagebox.showerror("读取失败", f"无法读取该文件: {str(e)}")
 
@@ -403,7 +404,7 @@ def on_export_txt():
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            status_label.config(text=f"文稿已保存至: {os.path.basename(file_path)}", fg="green")
+            status_label.config(text=f"文稿已保存至: {os.path.basename(file_path)}", bootstyle=SUCCESS)
         except Exception as e:
             messagebox.showerror("保存失败", f"无法保存: {str(e)}")
 
@@ -433,69 +434,74 @@ def on_clear():
     text_input.delete("1.0", tk.END)
     add_placeholder()
     root.focus()
-    status_label.config(text="已清空", fg="gray")
+    status_label.config(text="已清空", bootstyle=SECONDARY)
 
 # ================= 界面设计部分 =================
-root = tk.Tk()
-root.title("微课语音生成专业版 (多平台/版权所有)")
-root.geometry("780x690")
-root.minsize(700, 640)
+# 使用 ttkbootstrap 初始化现代化窗口
+root = tb.Window(title="微课语音生成专业版 (多平台/版权所有)", themename="litera", size=(820, 720))
+root.minsize(750, 680)
 
 saved_config = load_config()
 
-api_frame = tk.LabelFrame(root, text=" ⚙️ Azure 接口配置 (自动保存) ", font=("微软雅黑", 9))
-api_frame.pack(fill=tk.X, padx=15, pady=5)
+# 顶部 API 配置区
+api_frame = tb.LabelFrame(root, text=" ⚙️ Azure 接口配置 (自动保存) ", padding=10, bootstyle=INFO)
+api_frame.pack(fill=tk.X, padx=20, pady=10)
 
-tk.Label(api_frame, text="API 密钥:", font=("微软雅黑", 10)).grid(row=0, column=0, padx=5, pady=8, sticky="e")
-entry_key = tk.Entry(api_frame, width=35, show="*")
-entry_key.grid(row=0, column=1, padx=5, pady=8)
+tb.Label(api_frame, text="API 密钥:", font=("微软雅黑", 10)).grid(row=0, column=0, padx=5, pady=5, sticky="e")
+entry_key = tb.Entry(api_frame, width=40, show="*")
+entry_key.grid(row=0, column=1, padx=5, pady=5)
 entry_key.insert(0, saved_config.get("speech_key", ""))
 
-tk.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 10)).grid(row=0, column=2, padx=(15,5), pady=8, sticky="e")
-entry_region = tk.Entry(api_frame, width=15)
-entry_region.grid(row=0, column=3, padx=5, pady=8)
+tb.Label(api_frame, text="区域 (Region):", font=("微软雅黑", 10)).grid(row=0, column=2, padx=(20, 5), pady=5, sticky="e")
+entry_region = tb.Entry(api_frame, width=18)
+entry_region.grid(row=0, column=3, padx=5, pady=5)
 entry_region.insert(0, saved_config.get("service_region", ""))
 
-top_frame = tk.Frame(root)
-top_frame.pack(fill=tk.X, padx=15, pady=5)
+# 参数设置区
+top_frame = tb.Frame(root)
+top_frame.pack(fill=tk.X, padx=20, pady=10)
 
-tk.Label(top_frame, text="发音人:", font=("微软雅黑", 10, "bold")).grid(row=0, column=0, pady=5, sticky="e")
-voice_combo = ttk.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", width=33)
-voice_combo.grid(row=0, column=1, padx=5, pady=5)
+tb.Label(top_frame, text="发音人:", font=("微软雅黑", 10, "bold")).grid(row=0, column=0, pady=5, sticky="e")
+voice_combo = tb.Combobox(top_frame, values=list(VOICES.keys()), state="readonly", width=35, bootstyle=PRIMARY)
+voice_combo.grid(row=0, column=1, padx=10, pady=5)
 voice_combo.current(0)
 
-rate_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="语速(%)", resolution=1, length=100)
+rate_scale = tb.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=INFO, length=120)
 rate_scale.set(0)
-rate_scale.grid(row=0, column=2, padx=5)
+tb.Label(top_frame, text="语速").grid(row=1, column=2)
+rate_scale.grid(row=0, column=2, padx=10)
 
-pitch_scale = tk.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="音调(%)", resolution=1, length=100)
+pitch_scale = tb.Scale(top_frame, from_=-50, to=50, orient=tk.HORIZONTAL, bootstyle=WARNING, length=120)
 pitch_scale.set(0)
-pitch_scale.grid(row=0, column=3, padx=5)
+tb.Label(top_frame, text="音调").grid(row=1, column=3)
+pitch_scale.grid(row=0, column=3, padx=10)
 
-volume_scale = tk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="音量", resolution=1, length=90)
+volume_scale = tb.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL, bootstyle=SUCCESS, length=120)
 volume_scale.set(100)
-volume_scale.grid(row=0, column=4, padx=5)
+tb.Label(top_frame, text="音量").grid(row=1, column=4)
+volume_scale.grid(row=0, column=4, padx=10)
 
-btn_reset = tk.Button(top_frame, text="↺ 重置", command=reset_params, font=("微软雅黑", 9), bg="#F5F5F5", relief=tk.GROOVE)
-btn_reset.grid(row=0, column=5, padx=5, sticky="s", pady=6)
+btn_reset = tb.Button(top_frame, text="↺ 重置", command=reset_params, bootstyle=(SECONDARY, OUTLINE))
+btn_reset.grid(row=0, column=5, padx=10, sticky="s", pady=(0, 5))
 
-text_frame = tk.Frame(root)
-text_frame.pack(expand=True, fill=tk.BOTH, padx=15, pady=5)
+# 文本编辑区
+text_frame = tb.Frame(root)
+text_frame.pack(expand=True, fill=tk.BOTH, padx=20, pady=5)
 
-tool_frame = tk.Frame(text_frame)
+tool_frame = tb.Frame(text_frame)
 tool_frame.pack(fill=tk.X, pady=(0, 5))
 
-btn_import = tk.Button(tool_frame, text="📂 导入(TXT/Word)", command=on_import_file, bg="#E8F5E9", relief=tk.GROOVE)
-btn_import.pack(side=tk.LEFT, padx=(0, 5))
+btn_import = tb.Button(tool_frame, text="📂 导入 (TXT/Word)", command=on_import_file, bootstyle=(INFO, OUTLINE))
+btn_import.pack(side=tk.LEFT, padx=(0, 10))
 
-btn_export = tk.Button(tool_frame, text="💾 保存为TXT", command=on_export_txt, bg="#FFF3E0", relief=tk.GROOVE)
-btn_export.pack(side=tk.LEFT, padx=5)
+btn_export = tb.Button(tool_frame, text="💾 保存为 TXT", command=on_export_txt, bootstyle=(WARNING, OUTLINE))
+btn_export.pack(side=tk.LEFT)
 
-btn_pinyin = tk.Button(tool_frame, text="✍ 修正选中字读音", command=on_correct_pinyin, bg="#E3F2FD", relief=tk.GROOVE)
+btn_pinyin = tb.Button(tool_frame, text="✍ 修正选中字读音", command=on_correct_pinyin, bootstyle=(PRIMARY, OUTLINE))
 btn_pinyin.pack(side=tk.RIGHT)
 
-text_input = tk.Text(text_frame, height=9, font=("微软雅黑", 11), wrap=tk.WORD, undo=True, maxundo=-1)
-text_input.pack(expand=True, fill=tk.BOTH)
+text_input = tk.Text(text_frame, height=10, font=("微软雅黑", 11), wrap=tk.WORD, undo=True, maxundo=-1, relief=tk.FLAT, bg="#F8F9FA")
+text_input.pack(expand=True, fill=tk.BOTH, pady=5)
 
 text_input.bind("<FocusIn>", remove_placeholder)
 text_input.bind("<FocusOut>", add_placeholder)
@@ -520,42 +526,40 @@ context_menu.add_command(label="🗑 清空内容", command=on_clear)
 text_input.bind("<Button-3>", popup_context_menu)
 text_input.bind("<Button-2>", popup_context_menu)
 
-bottom_frame = tk.Frame(root)
-bottom_frame.pack(fill=tk.X, padx=15, pady=5)
+# 底部操作区
+bottom_frame = tb.Frame(root)
+bottom_frame.pack(fill=tk.X, padx=20, pady=10)
 
-play_frame = tk.Frame(bottom_frame)
-play_frame.pack(side=tk.TOP, pady=5)
+play_frame = tb.Frame(bottom_frame)
+play_frame.pack(side=tk.TOP, pady=10)
 
-btn_play = tk.Button(play_frame, text="🔊 试听音频", command=on_preview, width=12, bg="#FFF9C4")
-btn_play.grid(row=0, column=0, padx=5)
+btn_play = tb.Button(play_frame, text="🔊 试听音频", command=on_preview, width=12, bootstyle=WARNING)
+btn_play.grid(row=0, column=0, padx=10)
 
-btn_pause = tk.Button(play_frame, text="⏸ 暂停", command=on_toggle_pause, width=10)
-btn_pause.grid(row=0, column=1, padx=5)
+btn_pause = tb.Button(play_frame, text="⏸ 暂停", command=on_toggle_pause, width=10, bootstyle=(SECONDARY, OUTLINE))
+btn_pause.grid(row=0, column=1, padx=10)
 
-btn_stop = tk.Button(play_frame, text="⏹ 停止", command=stop_playback, width=10)
-btn_stop.grid(row=0, column=2, padx=5)
+btn_stop = tb.Button(play_frame, text="⏹ 停止", command=stop_playback, width=10, bootstyle=(DANGER, OUTLINE))
+btn_stop.grid(row=0, column=2, padx=10)
 
-btn_clear = tk.Button(play_frame, text="🗑 清空", command=on_clear, width=8)
-btn_clear.grid(row=0, column=3, padx=15)
+btn_clear = tb.Button(play_frame, text="🗑 清空文本", command=on_clear, width=10, bootstyle=SECONDARY)
+btn_clear.grid(row=0, column=3, padx=20)
 
-export_frame = tk.Frame(bottom_frame)
-export_frame.pack(side=tk.TOP, pady=(5, 10))
+export_frame = tb.Frame(bottom_frame)
+export_frame.pack(side=tk.TOP, pady=(5, 15))
 
-convert_btn_mp3 = tk.Button(export_frame, text="🎵 导出 MP3", font=("微软雅黑", 11, "bold"), 
-                            command=lambda: on_convert("mp3"), bg="#4CAF50", fg="white", width=16)
+convert_btn_mp3 = tb.Button(export_frame, text="🎵 导出 MP3", command=lambda: on_convert("mp3"), bootstyle=SUCCESS, width=20)
 convert_btn_mp3.pack(side=tk.LEFT, padx=15)
 
-convert_btn_wav = tk.Button(export_frame, text="🎚️ 导出 WAV", font=("微软雅黑", 11, "bold"), 
-                            command=lambda: on_convert("wav"), bg="#2196F3", fg="white", width=16)
+convert_btn_wav = tb.Button(export_frame, text="🎚️ 导出 WAV (无损)", command=lambda: on_convert("wav"), bootstyle=PRIMARY, width=20)
 convert_btn_wav.pack(side=tk.LEFT, padx=15)
 
-status_label = tk.Label(bottom_frame, text="准备就绪", font=("微软雅黑", 9), fg="gray")
-status_label.pack(pady=(0, 5))
+status_label = tb.Label(bottom_frame, text="准备就绪", font=("微软雅黑", 9), bootstyle=SECONDARY)
+status_label.pack(pady=(5, 10))
 
-# 【新增】作者与版权信息 (可点击)
-author_label = tk.Label(bottom_frame, text="© 俞晋全 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), fg="#9E9E9E", cursor="hand2")
+# 作者与版权信息
+author_label = tb.Label(bottom_frame, text="© 俞金泉 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), bootstyle=SECONDARY, cursor="hand2")
 author_label.pack(side=tk.BOTTOM, pady=(0, 5))
-# 绑定点击事件，弹出详细关于窗口
 author_label.bind("<Button-1>", lambda e: show_about())
 
 def on_closing():
