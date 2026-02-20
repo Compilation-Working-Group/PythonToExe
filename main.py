@@ -443,8 +443,8 @@ root.minsize(750, 680)
 
 saved_config = load_config()
 
-# 顶部 API 配置区
-api_frame = tb.LabelFrame(root, text=" ⚙️ Azure 接口配置 (自动保存) ", padding=10, bootstyle=INFO)
+# 顶部 API 配置区 (已修复 Labelframe 大小写问题)
+api_frame = tb.Labelframe(root, text=" ⚙️ Azure 接口配置 (自动保存) ", padding=10, bootstyle=INFO)
 api_frame.pack(fill=tk.X, padx=20, pady=10)
 
 tb.Label(api_frame, text="API 密钥:", font=("微软雅黑", 10)).grid(row=0, column=0, padx=5, pady=5, sticky="e")
@@ -558,7 +558,7 @@ status_label = tb.Label(bottom_frame, text="准备就绪", font=("微软雅黑",
 status_label.pack(pady=(5, 10))
 
 # 作者与版权信息
-author_label = tb.Label(bottom_frame, text="© 俞金泉 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), bootstyle=SECONDARY, cursor="hand2")
+author_label = tb.Label(bottom_frame, text="© 俞晋全 | 金塔县中学高中化学名师工作室", font=("微软雅黑", 8), bootstyle=SECONDARY, cursor="hand2")
 author_label.pack(side=tk.BOTTOM, pady=(0, 5))
 author_label.bind("<Button-1>", lambda e: show_about())
 
