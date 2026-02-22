@@ -226,33 +226,103 @@ class ModernAIDocWriter:
                 f.write(self.text_area.get("1.0", "end"))
             messagebox.showinfo("成功", "Markdown 文件导出成功！")
 
-    def export_word(self):
-        file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文档", "*.docx")], title="导出为 Word")
+   def export_word(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word 文档", "*.docx")], title="导出为公文排版 Word")
         if not file_path: return
         
         try:
             doc = Document()
+            
+            # === 1. 公文格式页面设置 (A4标准) ===
+            sections = doc.sections
+            for section in sections:
+                section.page_height = Mm(297)
+                section.page_width = Mm(210)
+                section.top_margin = Mm(37)
+                section.bottom_margin = Mm(35)
+                section.left_margin = Mm(28)
+                section.right_margin = Mm(26)
+            
+            # === 2. 全局正文样式 (仿宋, 三号字(16磅), 1.5倍行距) ===
+            style = doc.styles['Normal']
+            style.font.name = '仿宋'
+            style._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+            style.font.size = Pt(16)
+            style.paragraph_format.line_spacing = 1.5
+            style.paragraph_format.first_line_indent = Pt(32) # 首行缩进2字符(三号字=16磅，两个字=32磅)
+
             content = self.text_area.get("1.0", "end").strip()
             
+            # === 3. 逐行解析与去 Markdown 符号处理 ===
             for line in content.split('\n'):
-                if line.startswith('# '):
-                    doc.add_heading(line[2:].strip(), level=1)
-                elif line.startswith('## '):
-                    doc.add_heading(line[3:].strip(), level=2)
-                elif line.startswith('### '):
-                    doc.add_heading(line[4:].strip(), level=3)
-                elif line.startswith('- ') or line.startswith('* '):
-                    doc.add_paragraph(line[2:].strip(), style='List Bullet')
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 解析标题级数
+                heading_level = 0
+                match = re.match(r'^(#+)\s*(.*)', line)
+                if match:
+                    heading_level = len(match.group(1))
+                    line = match.group(2) # 剥离前面的 # 号
+                
+                # 清除行首无用的无序列表符号 (- 或 *)
+                line = re.sub(r'^[\-\*]\s+', '', line)
+                
+                if heading_level == 1:
+                    # 一级标题：黑体，三号，居中，不加粗
+                    p = doc.add_paragraph()
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    p.paragraph_format.first_line_indent = 0 # 居中不缩进
+                    
+                    line_clean = line.replace('*', '').replace('#', '') # 暴力清除残留符号
+                    run = p.add_run(line_clean)
+                    run.font.name = '黑体'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+                    run.font.size = Pt(16)
+                    run.font.bold = False
+                    
+                elif heading_level == 2:
+                    # 二级标题：楷体，三号，加粗，不缩进 (更醒目)
+                    p = doc.add_paragraph()
+                    p.paragraph_format.first_line_indent = 0
+                    
+                    line_clean = line.replace('*', '').replace('#', '')
+                    run = p.add_run(line_clean)
+                    run.font.name = '楷体'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '楷体')
+                    run.font.size = Pt(16)
+                    run.font.bold = True
+                    
                 else:
-                    if line.strip():
-                        doc.add_paragraph(line)
+                    # 正文或三级及以下标题：处理内联的 **粗体**
+                    p = doc.add_paragraph()
+                    
+                    if heading_level >= 3:
+                        p.paragraph_format.first_line_indent = Pt(32) # 缩进2字符
+                        run = p.add_run(line.replace('*', '').replace('#', ''))
+                        run.font.name = '仿宋'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
+                        run.font.size = Pt(16)
+                        run.font.bold = True
+                    else:
+                        # 普通正文拆分处理加粗
+                        parts = re.split(r'(\*\*.*?\*\*)', line)
+                        for part in parts:
+                            if part.startswith('**') and part.endswith('**'):
+                                run = p.add_run(part[2:-2]) # 去除**符号
+                                run.font.bold = True
+                            else:
+                                # 清理其余单独残留的Markdown乱码符号
+                                clean_part = part.replace('*', '').replace('#', '')
+                                if clean_part:
+                                    run = p.add_run(clean_part)
+                            
+                            # 统一设定正文字体
+                            run.font.name = '仿宋'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '仿宋')
             
             doc.save(file_path)
-            messagebox.showinfo("成功", f"Word 文件已成功导出至:\n{file_path}")
+            messagebox.showinfo("成功", f"✅ 公文级 Word 已成功导出，无残留符号！\n路径:\n{file_path}")
         except Exception as e:
             messagebox.showerror("错误", f"导出 Word 失败:\n{str(e)}")
-
-if __name__ == "__main__":
-    app = ctk.CTk()
-    ModernAIDocWriter(app)
-    app.mainloop()
